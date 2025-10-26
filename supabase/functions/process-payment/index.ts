@@ -31,7 +31,8 @@ serve(async (req) => {
       const customerDocument = customerData.cpf ? customerData.cpf.replace(/[^\d]/g, '') : null;
 
       if (!customerDocument) {
-        throw new new Error('Customer CPF is required for PIX payment.');
+        // CORREÇÃO: Removido o 'new' duplicado
+        throw new Error('Customer CPF is required for PIX payment.');
       }
 
       // --- CORREÇÃO: Endpoint da Amplopay para Pix-Charge (resolve o erro 405) ---
@@ -69,6 +70,7 @@ serve(async (req) => {
           if (pixResponse.status === 401) {
              errorMessage = 'Authentication Error: Invalid or expired API key.';
           } else {
+             // Tratamento para 405 ou erros não-JSON, mostrando a causa
              errorMessage = `Amplopay Error ${pixResponse.status}: ${errorDataText.substring(0, 100)}...`;
           }
         }
@@ -95,7 +97,7 @@ serve(async (req) => {
       // Process card payment
       const customerDocument = customerData.cpf ? customerData.cpf.replace(/[^\d]/g, '') : null;
 
-      // --- CORREÇÃO: Endpoint da Amplopay para Card-Charge (mais provável) ---
+      // --- CORREÇÃO: Endpoint da Amplopay para Card-Charge ---
       const cardResponse = await fetch('https://api.amplopay.com/v1/payments/card-charge', {
         method: 'POST',
         headers: {
