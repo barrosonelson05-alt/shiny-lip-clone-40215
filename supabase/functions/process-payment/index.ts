@@ -26,16 +26,16 @@ serve(async (req) => {
 
     // Process payment based on method
     if (paymentMethod === 'PIX') {
-      // --- CORREÇÃO 1: FORMATAR DADOS DO CLIENTE PARA O PADRÃO DA API ---
-      // A API da Amplopay provavelmente espera o CPF em um campo 'document' limpo.
+      // --- FORMATAR DADOS DO CLIENTE ---
+      // Garante que o CPF/CNPJ seja enviado apenas com dígitos
       const customerDocument = customerData.cpf ? customerData.cpf.replace(/[^\d]/g, '') : null;
 
       if (!customerDocument) {
-        throw new Error('Customer CPF is required for PIX payment.');
+        throw new new Error('Customer CPF is required for PIX payment.');
       }
 
-      // Gera o pagamento Pix
-      const pixResponse = await fetch('https://api.amplopay.com/v1/payments/pix', {
+      // --- CORREÇÃO: Endpoint da Amplopay para Pix-Charge (resolve o erro 405) ---
+      const pixResponse = await fetch('https://api.amplopay.com/v1/payments/pix-charge', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -53,7 +53,7 @@ serve(async (req) => {
       });
 
       if (!pixResponse.ok) {
-        // --- CORREÇÃO 2: CAPTURAR O ERRO ESPECÍFICO DA AMPLOPAY ---
+        // --- CAPTURA O ERRO ESPECÍFICO DA AMPLOPAY E LOGA ---
         const errorDataText = await pixResponse.text();
         console.error('Amplopay Pix response status:', pixResponse.status);
         console.error('Amplopay Pix error body:', errorDataText);
@@ -65,8 +65,12 @@ serve(async (req) => {
           const errorJson = JSON.parse(errorDataText);
           errorMessage = errorJson.message || errorJson.error || errorMessage;
         } catch (e) {
-          // Se não for JSON, usa o texto bruto do erro como último recurso
-          // Se o erro for 401 Unauthorized, por exemplo, o texto bruto é útil
+          // Se não for JSON, usa o status/texto bruto
+          if (pixResponse.status === 401) {
+             errorMessage = 'Authentication Error: Invalid or expired API key.';
+          } else {
+             errorMessage = `Amplopay Error ${pixResponse.status}: ${errorDataText.substring(0, 100)}...`;
+          }
         }
 
         throw new Error(errorMessage);
@@ -89,10 +93,10 @@ serve(async (req) => {
       
     } else if (paymentMethod === 'CARD') {
       // Process card payment
-      // Aplicando a mesma lógica de formatação de cliente para o Cartão
       const customerDocument = customerData.cpf ? customerData.cpf.replace(/[^\d]/g, '') : null;
 
-      const cardResponse = await fetch('https://api.amplopay.com/v1/payments/card', {
+      // --- CORREÇÃO: Endpoint da Amplopay para Card-Charge (mais provável) ---
+      const cardResponse = await fetch('https://api.amplopay.com/v1/payments/card-charge', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,7 +115,7 @@ serve(async (req) => {
       });
 
       if (!cardResponse.ok) {
-        // --- CORREÇÃO 2: CAPTURAR O ERRO ESPECÍFICO DA AMPLOPAY (CARTÃO) ---
+        // --- CAPTURA O ERRO ESPECÍFICO DA AMPLOPAY E LOGA ---
         const errorDataText = await cardResponse.text();
         console.error('Amplopay Card response status:', cardResponse.status);
         console.error('Amplopay Card error body:', errorDataText);
@@ -122,7 +126,11 @@ serve(async (req) => {
           const errorJson = JSON.parse(errorDataText);
           errorMessage = errorJson.message || errorJson.error || errorMessage;
         } catch (e) {
-          // Usa o texto bruto do erro
+          if (cardResponse.status === 401) {
+             errorMessage = 'Authentication Error: Invalid or expired API key.';
+          } else {
+             errorMessage = `Amplopay Error ${cardResponse.status}: ${errorDataText.substring(0, 100)}...`;
+          }
         }
 
         throw new Error(errorMessage);
@@ -148,7 +156,7 @@ serve(async (req) => {
   } catch (error) {
     console.error('Payment processing error:', error);
     
-    // Garante que a mensagem de erro do Amplopay seja exibida no Front-end
+    // Garante que a mensagem de erro seja exibida no Front-end
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     
     return new Response(
