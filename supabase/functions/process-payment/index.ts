@@ -2,12 +2,12 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// Variáveis de ambiente
-const AMPLOPAY_BASE_URL = Deno.env.get('AMPLOPAY_BASE_URL');
+// Variáveis de ambiente (mantemos apenas a chave secreta)
 const AMPLOPAY_SECRET_KEY = Deno.env.get('AMPLOPAY_SECRET_KEY');
 
-// O URL COMPLETO CORRETO para criar a cobrança PIX
-const PIX_CHARGE_URL = `${AMPLOPAY_BASE_URL}/pix-charge`;
+// O URL COMPLETO CORRETO para criar a cobrança PIX, HARDCODED para teste!
+// Se sua variável de ambiente estava errada, isso deve resolver.
+const PIX_CHARGE_URL = 'https://api.amplopay.com/v1/payments/pix-charge';
 
 // Função para formatar o CPF/Telefone removendo caracteres não numéricos
 function formatNumber(value: string | undefined): string | undefined {
@@ -16,7 +16,7 @@ function formatNumber(value: string | undefined): string | undefined {
 }
 
 serve(async (req: Request) => {
-    // 1. Configuração de CORS (necessário para aceitar requisições do seu site)
+    // 1. Configuração de CORS 
     if (req.method === 'OPTIONS') {
         return new Response(null, {
             headers: {
@@ -30,7 +30,6 @@ serve(async (req: Request) => {
     try {
         const data = await req.json();
         
-        // Log para monitoramento
         console.log("Processing payment:", data);
         
         const { paymentMethod, amount, customerData } = data;
@@ -44,26 +43,24 @@ serve(async (req: Request) => {
 
         // 2. Preparação dos dados para a Amplopay
         const amplopayBody = {
-            value: amount, // O valor
+            value: amount, // Valor
             customer: {
                 name: customerData.name,
                 email: customerData.email,
                 phone: formatNumber(customerData.phone),
                 cpf: formatNumber(customerData.cpf),
             },
-            // Adicione outros campos obrigatórios pela Amplopay, se houver
         };
 
-        // 3. Chamada à API Amplopay com os novos HEADERS
+        // 3. Chamada à API Amplopay (Usando URL hardcoded e headers robustos)
         const response = await fetch(PIX_CHARGE_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${AMPLOPAY_SECRET_KEY}`,
-                // --- NOVOS HEADERS ADICIONADOS PARA TENTAR RESOLVER O 405 ---
+                // Headers para tentar evitar o bloqueio de firewall/servidor
                 'User-Agent': 'Deno/1.x (Supabase Edge Function)',
                 'Accept': 'application/json',
-                // -----------------------------------------------------------
             },
             body: JSON.stringify(amplopayBody),
         });
@@ -72,11 +69,11 @@ serve(async (req: Request) => {
         if (!response.ok) {
             const errorBody = await response.text();
             
-            // LOGS CORRIGIDOS: Captura o status e o corpo do erro da Amplopay
+            // Log do erro da Amplopay
             console.error(`Amplopay Pix response status: ${response.status}`);
             console.error(`Amplopay Pix error body: ${errorBody}`);
 
-            // Lança um erro detalhado para ser reportado ao cliente
+            // Lança um erro detalhado (para o try/catch)
             const errorDetail = errorBody.substring(0, 100);
             throw new Error(`Failed to generate Pix payment (Status: ${response.status}. Details: ${errorDetail})`);
         }
