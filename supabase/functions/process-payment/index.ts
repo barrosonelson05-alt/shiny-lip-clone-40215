@@ -2,12 +2,12 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// Variáveis de ambiente (mantemos apenas a chave secreta)
+// Variável de ambiente necessária (Chave Secreta da Amplopay)
 const AMPLOPAY_SECRET_KEY = Deno.env.get('AMPLOPAY_SECRET_KEY');
 
-// O URL COMPLETO CORRETO para criar a cobrança PIX, HARDCODED para teste!
-// Se sua variável de ambiente estava errada, isso deve resolver.
+// URLs de integração (Hardcoded para eliminação de erro de variável de ambiente BASE_URL)
 const PIX_CHARGE_URL = 'https://api.amplopay.com/v1/payments/pix-charge';
+const CARD_CHARGE_URL = 'https://api.amplopay.com/v1/payments/card-charge'; 
 
 // Função para formatar o CPF/Telefone removendo caracteres não numéricos
 function formatNumber(value: string | undefined): string | undefined {
@@ -16,7 +16,7 @@ function formatNumber(value: string | undefined): string | undefined {
 }
 
 serve(async (req: Request) => {
-    // 1. Configuração de CORS 
+    // 1. Configuração de CORS (Obrigatório para requisições OPTIONS)
     if (req.method === 'OPTIONS') {
         return new Response(null, {
             headers: {
@@ -32,33 +32,67 @@ serve(async (req: Request) => {
         
         console.log("Processing payment:", data);
         
-        const { paymentMethod, amount, customerData } = data;
+        // Destruturação: Pega os dados do método, valor, cliente, e (opcionalmente) cartão
+        const { paymentMethod, amount, customerData, cardData } = data; 
 
-        if (paymentMethod !== 'PIX') {
+        let chargeUrl = '';
+        let amplopayBody = {};
+
+        // === LÓGICA DE CARTÃO DE CRÉDITO ===
+        if (paymentMethod === 'CARD') {
+            
+            // Validação mínima dos dados do cartão
+            if (!cardData || !cardData.number || !cardData.cvv || !cardData.month || !cardData.year) {
+                 throw new Error("Missing or incomplete credit card information.");
+            }
+            
+            chargeUrl = CARD_CHARGE_URL;
+            amplopayBody = {
+                value: amount, 
+                customer: {
+                    name: customerData.name,
+                    email: customerData.email,
+                    phone: formatNumber(customerData.phone),
+                    cpf: formatNumber(customerData.cpf),
+                },
+                // ATENÇÃO: Confirme que estes nomes de campos (card_holder, card_number, etc.) 
+                // são os que a Amplopay espera na documentação de Cartão de Crédito.
+                card_holder: cardData.holderName, 
+                card_number: cardData.number, 
+                card_expiration_month: cardData.month, 
+                card_expiration_year: cardData.year, 
+                card_cvv: cardData.cvv, 
+                installments: cardData.installments || 1 // Padrão 1x se não especificado
+            };
+            
+        // === LÓGICA DE PIX ===
+        } else if (paymentMethod === 'PIX') {
+            chargeUrl = PIX_CHARGE_URL;
+            amplopayBody = {
+                value: amount,
+                customer: {
+                    name: customerData.name,
+                    email: customerData.email,
+                    phone: formatNumber(customerData.phone),
+                    cpf: formatNumber(customerData.cpf),
+                },
+            };
+            
+        } else {
+            // Se o paymentMethod não for PIX nem CARD
             return new Response(JSON.stringify({ error: 'Unsupported payment method' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             });
         }
-
-        // 2. Preparação dos dados para a Amplopay
-        const amplopayBody = {
-            value: amount, // Valor
-            customer: {
-                name: customerData.name,
-                email: customerData.email,
-                phone: formatNumber(customerData.phone),
-                cpf: formatNumber(customerData.cpf),
-            },
-        };
-
-        // 3. Chamada à API Amplopay (Usando URL hardcoded e headers robustos)
-        const response = await fetch(PIX_CHARGE_URL, {
+        
+        // 3. Chamada à API Amplopay (USANDO A URL DETERMINADA ACIMA)
+        const response = await fetch(chargeUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${AMPLOPAY_SECRET_KEY}`,
-                // Headers para tentar evitar o bloqueio de firewall/servidor
+                // Headers para evitar o bloqueio de firewall/servidor (tentativa de resolver o 405)
                 'User-Agent': 'Deno/1.x (Supabase Edge Function)',
                 'Accept': 'application/json',
             },
@@ -69,23 +103,22 @@ serve(async (req: Request) => {
         if (!response.ok) {
             const errorBody = await response.text();
             
-            // Log do erro da Amplopay
-            console.error(`Amplopay Pix response status: ${response.status}`);
-            console.error(`Amplopay Pix error body: ${errorBody}`);
+            console.error(`Amplopay response status: ${response.status}`);
+            console.error(`Amplopay error body: ${errorBody}`);
 
-            // Lança um erro detalhado (para o try/catch)
             const errorDetail = errorBody.substring(0, 100);
-            throw new Error(`Failed to generate Pix payment (Status: ${response.status}. Details: ${errorDetail})`);
+            throw new Error(`Failed to generate payment (Status: ${response.status}. Details: ${errorDetail})`);
         }
 
         // 5. Se a resposta for OK (Status 200)
-        const pixData = await response.json();
+        const paymentData = await response.json();
 
-        // 6. Retorna o QR Code e outros dados do PIX
+        // 6. Retorna a resposta ao Front-end
         return new Response(
             JSON.stringify({
                 success: true,
-                pix: pixData,
+                paymentData: paymentData,
+                method: paymentMethod 
             }),
             {
                 status: 200,
@@ -100,7 +133,7 @@ serve(async (req: Request) => {
         return new Response(
             JSON.stringify({ 
                 error: 'Internal Server Error', 
-                message: 'Failed to process payment. Check server logs for details.' 
+                message: error.message 
             }),
             {
                 status: 500,
