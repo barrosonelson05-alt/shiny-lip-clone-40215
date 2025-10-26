@@ -6,10 +6,15 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Gift, Zap, Truck, RotateCcw, Lock, CreditCard } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { useToast } from '@/hooks/use-toast';
+import tiktokShopIcon from '@/assets/tiktok-shop-icon.webp';
+import scooterProduct from '@/assets/scooter-product.webp';
 
 const Checkout = () => {
+  const { toast } = useToast();
   const [timeLeft, setTimeLeft] = useState(120000); // 2 minutes in milliseconds
   const [selectedPayment, setSelectedPayment] = useState('Pix');
+  const [cepLoading, setCepLoading] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -28,6 +33,59 @@ const Checkout = () => {
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
+  const fillAddress = async (cep: string) => {
+    // Remove any non-numeric characters
+    const cleanCep = cep.replace(/\D/g, '');
+    
+    // Validate CEP length
+    if (cleanCep.length !== 8) {
+      return;
+    }
+
+    setCepLoading(true);
+    
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+      const data = await response.json();
+      
+      if (data.erro) {
+        toast({
+          title: "CEP não encontrado",
+          description: "Por favor, verifique o CEP digitado.",
+          variant: "destructive",
+        });
+        // Clear address fields
+        (document.getElementById('address') as HTMLInputElement).value = '';
+        (document.getElementById('neighborhood') as HTMLInputElement).value = '';
+        (document.getElementById('city') as HTMLInputElement).value = '';
+        (document.getElementById('state') as HTMLInputElement).value = '';
+        return;
+      }
+      
+      // Fill address fields
+      (document.getElementById('address') as HTMLInputElement).value = data.logradouro || '';
+      (document.getElementById('neighborhood') as HTMLInputElement).value = data.bairro || '';
+      (document.getElementById('city') as HTMLInputElement).value = data.localidade || '';
+      (document.getElementById('state') as HTMLInputElement).value = data.uf || '';
+      
+      // Focus on number field
+      document.getElementById('number')?.focus();
+      
+      toast({
+        title: "Endereço encontrado!",
+        description: "Os campos foram preenchidos automaticamente.",
+      });
+    } catch (error) {
+      toast({
+        title: "Erro ao buscar CEP",
+        description: "Não foi possível buscar o endereço. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setCepLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#f9f9fa]">
       {/* Header */}
@@ -35,8 +93,8 @@ const Checkout = () => {
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-cyan-500 to-pink-500 rounded-full"></div>
-              <span className="font-bold text-lg">TTShop - Oficial</span>
+              <img src={tiktokShopIcon} alt="TikTok Shop" className="w-8 h-8" />
+              <span className="font-bold text-lg">TikTokShop - Oficial</span>
             </div>
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <Lock className="h-4 w-4" />
@@ -92,7 +150,11 @@ const Checkout = () => {
         {/* Product Info */}
         <div className="bg-white rounded-lg p-6 mb-6 shadow-sm">
           <div className="flex gap-4">
-            <div className="w-24 h-24 bg-gray-200 rounded-lg flex-shrink-0"></div>
+            <img 
+              src={scooterProduct} 
+              alt="Patinete Elétrico" 
+              className="w-24 h-24 rounded-lg flex-shrink-0 object-cover"
+            />
             <div className="flex-1">
               <h3 className="font-bold text-lg mb-2">
                 Patinete Elétrico Scooter De Alumínio Com Bluetooth 30km/h
@@ -187,11 +249,28 @@ const Checkout = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="cep">CEP</Label>
-                <Input id="cep" placeholder="00000-000" />
+                <Input 
+                  id="cep" 
+                  placeholder="00000-000" 
+                  maxLength={9}
+                  onBlur={(e) => fillAddress(e.target.value)}
+                  disabled={cepLoading}
+                />
+                {cepLoading && <p className="text-xs text-muted-foreground mt-1">Buscando endereço...</p>}
               </div>
               <div>
                 <Label htmlFor="address">Endereço</Label>
-                <Input id="address" placeholder="Rua, número" />
+                <Input id="address" placeholder="Rua" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="number">Número</Label>
+                <Input id="number" placeholder="Número" />
+              </div>
+              <div>
+                <Label htmlFor="complement">Complemento</Label>
+                <Input id="complement" placeholder="Apto, bloco, etc (opcional)" />
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -285,10 +364,10 @@ const Checkout = () => {
         </div>
       </div>
 
-      {/* Footer */}
+        {/* Footer */}
       <footer className="bg-[#f2f2f2] py-8 mt-12">
         <div className="container mx-auto px-4 text-center text-sm text-[#3a3636]">
-          <p className="mb-2">© 2025 TTShop - Oficial. Todos os direitos reservados.</p>
+          <p className="mb-2">© 2025 TikTokShop - Oficial. Todos os direitos reservados.</p>
           <div className="flex items-center justify-center gap-4">
             <span>CNPJ: 21.999.999/923131</span>
             <span>•</span>
