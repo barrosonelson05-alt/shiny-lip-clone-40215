@@ -108,6 +108,27 @@ const Checkout = () => {
     return cleaned;
   };
 
+  const formatCPF = (value: string) => {
+    const cleaned = value.replace(/\D/g, '');
+    if (cleaned.length <= 11) {
+      return cleaned
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d)/, '$1.$2')
+        .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+    }
+    return value;
+  };
+
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  const validateCPF = (cpf: string) => {
+    const cleaned = cpf.replace(/\D/g, '');
+    return cleaned.length === 11;
+  };
+
   const handleCardInputChange = (field: string, value: string) => {
     let formattedValue = value;
     
@@ -142,7 +163,37 @@ const Checkout = () => {
         return;
       }
 
-      const customerData = { name, email, phone, cpf };
+      // Validate email format
+      if (!validateEmail(email)) {
+        toast({
+          title: "Email inválido",
+          description: "Por favor, digite um email válido.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // Validate CPF format
+      if (!validateCPF(cpf)) {
+        toast({
+          title: "CPF inválido",
+          description: "Por favor, digite um CPF válido com 11 dígitos.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      // Clean CPF (remove formatting) before sending to backend
+      const cleanedCPF = cpf.replace(/\D/g, '');
+
+      const customerData = { 
+        name: name.trim(), 
+        email: email.trim(), 
+        phone: phone.replace(/\D/g, ''), 
+        cpf: cleanedCPF 
+      };
       const amount = selectedPayment === 'Pix' ? 63.15 : 67.90;
 
       if (selectedPayment === 'Cartao') {
@@ -370,7 +421,14 @@ const Checkout = () => {
               </div>
               <div>
                 <Label htmlFor="cpf">CPF</Label>
-                <Input id="cpf" placeholder="000.000.000-00" />
+                <Input 
+                  id="cpf" 
+                  placeholder="000.000.000-00"
+                  maxLength={14}
+                  onChange={(e) => {
+                    e.target.value = formatCPF(e.target.value);
+                  }}
+                />
               </div>
             </div>
           </div>
