@@ -2,9 +2,8 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// URL base da Amplopay (deve ser configurada como variável de ambiente no Lovable Cloud/Supabase)
+// Variáveis de ambiente
 const AMPLOPAY_BASE_URL = Deno.env.get('AMPLOPAY_BASE_URL');
-// Chave secreta da Amplopay (deve ser configurada como variável de ambiente no Lovable Cloud/Supabase)
 const AMPLOPAY_SECRET_KEY = Deno.env.get('AMPLOPAY_SECRET_KEY');
 
 // O URL COMPLETO CORRETO para criar a cobrança PIX
@@ -31,7 +30,7 @@ serve(async (req: Request) => {
     try {
         const data = await req.json();
         
-        // Log para monitoramento (agora com todos os dados de cliente)
+        // Log para monitoramento
         console.log("Processing payment:", data);
         
         const { paymentMethod, amount, customerData } = data;
@@ -45,27 +44,31 @@ serve(async (req: Request) => {
 
         // 2. Preparação dos dados para a Amplopay
         const amplopayBody = {
-            value: amount, // O valor já deve estar em centavos se o front-end seguiu o código anterior.
+            value: amount, // O valor
             customer: {
                 name: customerData.name,
                 email: customerData.email,
-                phone: formatNumber(customerData.phone), // Garante que o número está formatado
-                cpf: formatNumber(customerData.cpf),     // Garante que o CPF está formatado
+                phone: formatNumber(customerData.phone),
+                cpf: formatNumber(customerData.cpf),
             },
             // Adicione outros campos obrigatórios pela Amplopay, se houver
         };
 
-        // 3. Chamada à API Amplopay (CORREÇÃO DA URL: USANDO PIX_CHARGE_URL)
+        // 3. Chamada à API Amplopay com os novos HEADERS
         const response = await fetch(PIX_CHARGE_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${AMPLOPAY_SECRET_KEY}`, // Usa a chave secreta
+                'Authorization': `Bearer ${AMPLOPAY_SECRET_KEY}`,
+                // --- NOVOS HEADERS ADICIONADOS PARA TENTAR RESOLVER O 405 ---
+                'User-Agent': 'Deno/1.x (Supabase Edge Function)',
+                'Accept': 'application/json',
+                // -----------------------------------------------------------
             },
             body: JSON.stringify(amplopayBody),
         });
 
-        // 4. Tratamento de resposta CORRIGIDO (Capitura o corpo do erro)
+        // 4. Tratamento de resposta
         if (!response.ok) {
             const errorBody = await response.text();
             
@@ -73,8 +76,9 @@ serve(async (req: Request) => {
             console.error(`Amplopay Pix response status: ${response.status}`);
             console.error(`Amplopay Pix error body: ${errorBody}`);
 
-            // Lança um erro detalhado para ser capturado no try/catch e reportado ao cliente
-            throw new Error(`Failed to generate Pix payment (Status: ${response.status}. Details: ${errorBody.substring(0, 100)})`);
+            // Lança um erro detalhado para ser reportado ao cliente
+            const errorDetail = errorBody.substring(0, 100);
+            throw new Error(`Failed to generate Pix payment (Status: ${response.status}. Details: ${errorDetail})`);
         }
 
         // 5. Se a resposta for OK (Status 200)
