@@ -1,175 +1,110 @@
+// process-payment/index.ts
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+// URL base da Amplopay (deve ser configurada como variável de ambiente no Lovable Cloud/Supabase)
+const AMPLOPAY_BASE_URL = Deno.env.get('AMPLOPAY_BASE_URL');
+// Chave secreta da Amplopay (deve ser configurada como variável de ambiente no Lovable Cloud/Supabase)
+const AMPLOPAY_SECRET_KEY = Deno.env.get('AMPLOPAY_SECRET_KEY');
 
-serve(async (req) => {
-  // Handle CORS preflight requests
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+// O URL COMPLETO CORRETO para criar a cobrança PIX
+const PIX_CHARGE_URL = `${AMPLOPAY_BASE_URL}/pix-charge`;
 
-  try {
-    // Recebe os dados do Front-end
-    const { paymentMethod, amount, cardToken, customerData } = await req.json();
-    
-    console.log('Processing payment:', { paymentMethod, amount, customerData });
-    
-    const secretKey = Deno.env.get('AMPLOPAY_SECRET_KEY');
-    
-    if (!secretKey) {
-      // Erro se a chave secreta não estiver configurada no Supabase Secrets
-      throw new Error('AMPLOPAY_SECRET_KEY not configured on server');
+// Função para formatar o CPF/Telefone removendo caracteres não numéricos
+function formatNumber(value: string | undefined): string | undefined {
+    if (!value) return value;
+    return value.replace(/\D/g, '');
+}
+
+serve(async (req: Request) => {
+    // 1. Configuração de CORS (necessário para aceitar requisições do seu site)
+    if (req.method === 'OPTIONS') {
+        return new Response(null, {
+            headers: {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'POST, OPTIONS',
+                'Access-Control-Allow-Headers': 'Authorization, X-Client-ID, Content-Type',
+            },
+        });
     }
 
-    // Process payment based on method
-    if (paymentMethod === 'PIX') {
-      // --- FORMATAR DADOS DO CLIENTE ---
-      // Garante que o CPF/CNPJ seja enviado apenas com dígitos
-      const customerDocument = customerData.cpf ? customerData.cpf.replace(/[^\d]/g, '') : null;
-
-      if (!customerDocument) {
-        // CORREÇÃO: Removido o 'new' duplicado
-        throw new Error('Customer CPF is required for PIX payment.');
-      }
-
-      // --- CORREÇÃO: Endpoint da Amplopay para Pix-Charge (resolve o erro 405) ---
-      const pixResponse = await fetch('https://api.amplopay.com/v1/payments/pix-charge', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${secretKey}`,
-        },
-        body: JSON.stringify({
-          amount: amount,
-          customer: {
-            name: customerData.name,
-            email: customerData.email,
-            phone: customerData.phone,
-            document: customerDocument, // CPF/CNPJ LIMPO
-          },
-        }),
-      });
-
-      if (!pixResponse.ok) {
-        // --- CAPTURA O ERRO ESPECÍFICO DA AMPLOPAY E LOGA ---
-        const errorDataText = await pixResponse.text();
-        console.error('Amplopay Pix response status:', pixResponse.status);
-        console.error('Amplopay Pix error body:', errorDataText);
+    try {
+        const data = await req.json();
         
-        let errorMessage = 'Failed to generate Pix payment (Check server logs for details)';
+        // Log para monitoramento (agora com todos os dados de cliente)
+        console.log("Processing payment:", data);
+        
+        const { paymentMethod, amount, customerData } = data;
 
-        try {
-          // Tenta analisar o JSON de erro da Amplopay para obter a mensagem exata
-          const errorJson = JSON.parse(errorDataText);
-          errorMessage = errorJson.message || errorJson.error || errorMessage;
-        } catch (e) {
-          // Se não for JSON, usa o status/texto bruto
-          if (pixResponse.status === 401) {
-             errorMessage = 'Authentication Error: Invalid or expired API key.';
-          } else {
-             // Tratamento para 405 ou erros não-JSON, mostrando a causa
-             errorMessage = `Amplopay Error ${pixResponse.status}: ${errorDataText.substring(0, 100)}...`;
-          }
+        if (paymentMethod !== 'PIX') {
+            return new Response(JSON.stringify({ error: 'Unsupported payment method' }), {
+                status: 400,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            });
         }
 
-        throw new Error(errorMessage);
-      }
+        // 2. Preparação dos dados para a Amplopay
+        const amplopayBody = {
+            value: amount, // O valor já deve estar em centavos se o front-end seguiu o código anterior.
+            customer: {
+                name: customerData.name,
+                email: customerData.email,
+                phone: formatNumber(customerData.phone), // Garante que o número está formatado
+                cpf: formatNumber(customerData.cpf),     // Garante que o CPF está formatado
+            },
+            // Adicione outros campos obrigatórios pela Amplopay, se houver
+        };
 
-      const pixData = await pixResponse.json();
-      
-      console.log('Pix payment created successfully');
-      
-      return new Response(
-        JSON.stringify({
-          success: true,
-          paymentMethod: 'PIX',
-          pixCode: pixData.pixCode || pixData.qrCode,
-          qrCodeImage: pixData.qrCodeImage,
-          transactionId: pixData.transactionId || pixData.id,
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-      
-    } else if (paymentMethod === 'CARD') {
-      // Process card payment
-      const customerDocument = customerData.cpf ? customerData.cpf.replace(/[^\d]/g, '') : null;
+        // 3. Chamada à API Amplopay (CORREÇÃO DA URL: USANDO PIX_CHARGE_URL)
+        const response = await fetch(PIX_CHARGE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${AMPLOPAY_SECRET_KEY}`, // Usa a chave secreta
+            },
+            body: JSON.stringify(amplopayBody),
+        });
 
-      // --- CORREÇÃO: Endpoint da Amplopay para Card-Charge ---
-      const cardResponse = await fetch('https://api.amplopay.com/v1/payments/card-charge', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${secretKey}`,
-        },
-        body: JSON.stringify({
-          amount: amount,
-          cardToken: cardToken,
-          customer: {
-            name: customerData.name,
-            email: customerData.email,
-            phone: customerData.phone,
-            document: customerDocument,
-          },
-        }),
-      });
+        // 4. Tratamento de resposta CORRIGIDO (Capitura o corpo do erro)
+        if (!response.ok) {
+            const errorBody = await response.text();
+            
+            // LOGS CORRIGIDOS: Captura o status e o corpo do erro da Amplopay
+            console.error(`Amplopay Pix response status: ${response.status}`);
+            console.error(`Amplopay Pix error body: ${errorBody}`);
 
-      if (!cardResponse.ok) {
-        // --- CAPTURA O ERRO ESPECÍFICO DA AMPLOPAY E LOGA ---
-        const errorDataText = await cardResponse.text();
-        console.error('Amplopay Card response status:', cardResponse.status);
-        console.error('Amplopay Card error body:', errorDataText);
-        
-        let errorMessage = 'Failed to process card payment (Check server logs for details)';
-
-        try {
-          const errorJson = JSON.parse(errorDataText);
-          errorMessage = errorJson.message || errorJson.error || errorMessage;
-        } catch (e) {
-          if (cardResponse.status === 401) {
-             errorMessage = 'Authentication Error: Invalid or expired API key.';
-          } else {
-             errorMessage = `Amplopay Error ${cardResponse.status}: ${errorDataText.substring(0, 100)}...`;
-          }
+            // Lança um erro detalhado para ser capturado no try/catch e reportado ao cliente
+            throw new Error(`Failed to generate Pix payment (Status: ${response.status}. Details: ${errorBody.substring(0, 100)})`);
         }
 
-        throw new Error(errorMessage);
-      }
+        // 5. Se a resposta for OK (Status 200)
+        const pixData = await response.json();
 
-      const cardData = await cardResponse.json();
-      
-      console.log('Card payment processed successfully');
-      
-      return new Response(
-        JSON.stringify({
-          success: true,
-          paymentMethod: 'CARD',
-          transactionId: cardData.transactionId || cardData.id,
-          status: cardData.status,
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    } else {
-      throw new Error('Invalid payment method');
+        // 6. Retorna o QR Code e outros dados do PIX
+        return new Response(
+            JSON.stringify({
+                success: true,
+                pix: pixData,
+            }),
+            {
+                status: 200,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            }
+        );
+
+    } catch (error) {
+        console.error("Payment processing error:", error.message);
+
+        // Retorna uma resposta de erro genérica ao front-end
+        return new Response(
+            JSON.stringify({ 
+                error: 'Internal Server Error', 
+                message: 'Failed to process payment. Check server logs for details.' 
+            }),
+            {
+                status: 500,
+                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+            }
+        );
     }
-    
-  } catch (error) {
-    console.error('Payment processing error:', error);
-    
-    // Garante que a mensagem de erro seja exibida no Front-end
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-    
-    return new Response(
-      JSON.stringify({
-        success: false,
-        error: errorMessage,
-      }),
-      { 
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      }
-    );
-  }
 });
