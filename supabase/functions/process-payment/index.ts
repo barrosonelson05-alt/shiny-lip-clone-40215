@@ -2,12 +2,21 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
-// Variável de ambiente necessária (Chave Secreta da Amplopay)
-const AMPLOPAY_SECRET_KEY = Deno.env.get('AMPLOPAY_SECRET_KEY');
+// --- 1. CONFIGURAÇÃO EXPFYPAY ---
 
-// URLs de integração (Hardcoded)
-const PIX_CHARGE_URL = 'https://api.amplopay.com/v1/payments/pix-charge';
-const CARD_CHARGE_URL = 'https://api.amplopay.com/v1/payments/card-charge'; 
+// Variáveis de ambiente da ExpfyPay (Devem ser configuradas no painel do Supabase)
+const EXPFY_API_URL = Deno.env.get('EXPFY_API_URL') || 'https://expfypay.com/api/v1';
+const EXPFY_PK = Deno.env.get('EXPFY_PK'); // Chave Pública (pk_...)
+const EXPFY_SK = Deno.env.get('EXPFY_SK'); // Chave Secreta (sk_...)
+
+// Endpoint de criação de PIX da ExpfyPay
+const EXPFY_PIX_ENDPOINT = `${EXPFY_API_URL}/pix`; 
+
+if (!EXPFY_PK || !EXPFY_SK) {
+    console.error("ERRO: As chaves EXPFY_PK e EXPFY_SK não estão configuradas nas Secrets do Supabase.");
+}
+
+// --- 2. FUNÇÕES AUXILIARES ---
 
 // Função para formatar o CPF/Telefone removendo caracteres não numéricos
 function formatNumber(value: string | undefined): string | undefined {
@@ -17,8 +26,7 @@ function formatNumber(value: string | undefined): string | undefined {
 
 /**
  * Função que valida a estrutura matemática de um CPF (sem consultar a Receita).
- * @param cpf CPF em formato de string (apenas dígitos).
- * @returns true se o CPF for matematicamente válido, false caso contrário.
+ * (Mantida do código anterior)
  */
 function isCpfValid(cpf: string): boolean {
     if (!cpf) return false;
@@ -54,8 +62,11 @@ function isCpfValid(cpf: string): boolean {
     return true;
 }
 
+
+// --- 3. FUNÇÃO PRINCIPAL (HANDLER) ---
+
 serve(async (req: Request) => {
-    // 1. Configuração de CORS 
+    // 1. Configuração de CORS (Essencial para Edge Functions)
     if (req.method === 'OPTIONS') {
         return new Response(null, {
             headers: {
@@ -66,14 +77,22 @@ serve(async (req: Request) => {
         });
     }
 
+    // Validação inicial das chaves
+    if (!EXPFY_PK || !EXPFY_SK) {
+        return new Response(JSON.stringify({ error: 'Configuração de API inválida' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+        });
+    }
+
     try {
         const data = await req.json();
         
-        console.log("Processing payment:", data);
+        console.log("Processando pagamento ExpfyPay:", data);
         
-        const { paymentMethod, amount, customerData, cardData } = data; 
-        
-        // --- VALIDAÇÃO DO CPF (APLICADA ANTES DE CHAMAR A API EXTERNA) ---
+        const { paymentMethod, amount, customerData } = data; // CardData removido, foco no PIX
+
+        // --- VALIDAÇÃO DO CPF ---
         const cleanCpf = formatNumber(customerData.cpf);
         if (!isCpfValid(cleanCpf || "")) {
             return new Response(
@@ -89,93 +108,76 @@ serve(async (req: Request) => {
         }
         // -----------------------------
 
-        let chargeUrl = '';
-        let amplopayBody = {};
+        // === LÓGICA DE PAGAMENTO PIX (Foco no ExpfyPay) ===
+        if (paymentMethod === 'PIX') {
+            
+            // Assume-se que o valor deve ser em CENTAVOS (padrão de API)
+            const amountInCents = Math.round(amount * 100); 
 
-        // === LÓGICA DE PAGAMENTO ===
-        if (paymentMethod === 'CARD') {
+            const expfypayBody = {
+                amount: amountInCents,
+                // Dados do cliente/pagador (payer)
+                customer: {
+                    name: customerData.name,
+                    email: customerData.email,
+                    phone: formatNumber(customerData.phone),
+                    document: cleanCpf, // Usando o CPF limpo e validado
+                },
+                // ID de rastreio para conciliação
+                reference_id: `SUPABASE_ORDER_${Date.now()}`, 
+            };
             
-            // Validação mínima dos dados do cartão
-            if (!cardData || !cardData.number || !cardData.cvv || !cardData.month || !cardData.year) {
-                 throw new Error("Missing or incomplete credit card information.");
+            console.log("ExpfyPay Request Body:", JSON.stringify(expfypayBody));
+            
+            // 4. Chamada à API ExpfyPay
+            const response = await fetch(EXPFY_PIX_ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    // Autenticação: Nomes dos Headers podem mudar.
+                    // Usando o formato padrão "X-Public-Key" e "X-Secret-Key" como palpite.
+                    'X-Public-Key': EXPFY_PK, 
+                    'X-Secret-Key': EXPFY_SK, 
+                    'User-Agent': 'Deno/1.x (Supabase Edge Function)',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify(expfypayBody),
+            });
+
+            // 5. Tratamento de resposta
+            if (!response.ok) {
+                const errorBody = await response.text();
+                
+                console.error(`ExpfyPay response status: ${response.status}`);
+                console.error(`ExpfyPay error body: ${errorBody}`);
+
+                const errorDetail = errorBody.substring(0, 100);
+                throw new Error(`Falha ao gerar pagamento (Status: ${response.status}. Detalhes: ${errorDetail})`);
             }
-            
-            chargeUrl = CARD_CHARGE_URL;
-            amplopayBody = {
-                value: amount, 
-                customer: {
-                    name: customerData.name,
-                    email: customerData.email,
-                    phone: formatNumber(customerData.phone),
-                    cpf: cleanCpf, // Usando o CPF limpo e validado
-                },
-                // ATENÇÃO: Confirme os nomes dos campos na documentação da Amplopay!
-                card_holder: cardData.holderName, 
-                card_number: cardData.number, 
-                card_expiration_month: cardData.month, 
-                card_expiration_year: cardData.year, 
-                card_cvv: cardData.cvv, 
-                installments: cardData.installments || 1 
-            };
-            
-        } else if (paymentMethod === 'PIX') {
-            chargeUrl = PIX_CHARGE_URL;
-            amplopayBody = {
-                value: amount,
-                customer: {
-                    name: customerData.name,
-                    email: customerData.email,
-                    phone: formatNumber(customerData.phone),
-                    cpf: cleanCpf, // Usando o CPF limpo e validado
-                },
-            };
+
+            // 6. Se a resposta for OK (Status 200)
+            const paymentData = await response.json();
+
+            // 7. Retorna os dados do PIX (QR Code, Pix Copia e Cola) ao Front-end
+            return new Response(
+                JSON.stringify({
+                    success: true,
+                    paymentData: paymentData,
+                    method: paymentMethod 
+                }),
+                {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+                }
+            );
             
         } else {
-            return new Response(JSON.stringify({ error: 'Unsupported payment method' }), {
+            // Se tentar usar outro método sem PIX
+            return new Response(JSON.stringify({ error: 'Unsupported payment method. Only PIX is currently integrated.' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             });
         }
-        
-        // 3. Chamada à API Amplopay
-        const response = await fetch(chargeUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${AMPLOPAY_SECRET_KEY}`,
-                // Tentativa de evitar o bloqueio 405
-                'User-Agent': 'Deno/1.x (Supabase Edge Function)',
-                'Accept': 'application/json',
-            },
-            body: JSON.stringify(amplopayBody),
-        });
-
-        // 4. Tratamento de resposta
-        if (!response.ok) {
-            const errorBody = await response.text();
-            
-            console.error(`Amplopay response status: ${response.status}`);
-            console.error(`Amplopay error body: ${errorBody}`);
-
-            const errorDetail = errorBody.substring(0, 100);
-            throw new Error(`Failed to generate payment (Status: ${response.status}. Details: ${errorDetail})`);
-        }
-
-        // 5. Se a resposta for OK (Status 200)
-        const paymentData = await response.json();
-
-        // 6. Retorna a resposta ao Front-end
-        return new Response(
-            JSON.stringify({
-                success: true,
-                paymentData: paymentData,
-                method: paymentMethod 
-            }),
-            {
-                status: 200,
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-            }
-        );
 
     } catch (error) {
         console.error("Payment processing error:", error.message);
