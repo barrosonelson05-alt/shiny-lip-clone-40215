@@ -7,6 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { Gift, Zap, Truck, RotateCcw, Lock, CreditCard } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import tiktokShopIcon from '@/assets/tiktok-shop-icon.webp';
 import scooterProduct from '@/assets/scooter-product.webp';
 
@@ -15,6 +16,13 @@ const Checkout = () => {
   const [timeLeft, setTimeLeft] = useState(120000); // 2 minutes in milliseconds
   const [selectedPayment, setSelectedPayment] = useState('Pix');
   const [cepLoading, setCepLoading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [cardData, setCardData] = useState({
+    number: '',
+    holderName: '',
+    expiration: '',
+    cvv: ''
+  });
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -83,6 +91,132 @@ const Checkout = () => {
       });
     } finally {
       setCepLoading(false);
+    }
+  };
+
+  const formatCardNumber = (value: string) => {
+    const cleaned = value.replace(/\D/g, '');
+    const formatted = cleaned.match(/.{1,4}/g)?.join(' ') || cleaned;
+    return formatted.substring(0, 19); // 16 digits + 3 spaces
+  };
+
+  const formatExpiration = (value: string) => {
+    const cleaned = value.replace(/\D/g, '');
+    if (cleaned.length >= 2) {
+      return cleaned.substring(0, 2) + '/' + cleaned.substring(2, 4);
+    }
+    return cleaned;
+  };
+
+  const handleCardInputChange = (field: string, value: string) => {
+    let formattedValue = value;
+    
+    if (field === 'number') {
+      formattedValue = formatCardNumber(value);
+    } else if (field === 'expiration') {
+      formattedValue = formatExpiration(value);
+    } else if (field === 'cvv') {
+      formattedValue = value.replace(/\D/g, '').substring(0, 4);
+    }
+    
+    setCardData(prev => ({ ...prev, [field]: formattedValue }));
+  };
+
+  const processPayment = async () => {
+    setIsProcessing(true);
+    
+    try {
+      // Validate required fields
+      const name = (document.getElementById('name') as HTMLInputElement)?.value;
+      const email = (document.getElementById('email') as HTMLInputElement)?.value;
+      const phone = (document.getElementById('phone') as HTMLInputElement)?.value;
+      const cpf = (document.getElementById('cpf') as HTMLInputElement)?.value;
+
+      if (!name || !email || !phone || !cpf) {
+        toast({
+          title: "Campos obrigatórios",
+          description: "Por favor, preencha todos os dados de identificação.",
+          variant: "destructive",
+        });
+        setIsProcessing(false);
+        return;
+      }
+
+      const customerData = { name, email, phone, cpf };
+      const amount = selectedPayment === 'Pix' ? 63.15 : 67.90;
+
+      if (selectedPayment === 'Cartao') {
+        // Validate card fields
+        if (!cardData.number || !cardData.holderName || !cardData.expiration || !cardData.cvv) {
+          toast({
+            title: "Dados do cartão incompletos",
+            description: "Por favor, preencha todos os dados do cartão.",
+            variant: "destructive",
+          });
+          setIsProcessing(false);
+          return;
+        }
+
+        // Tokenize card with Amplopay (simulated)
+        const cardToken = btoa(JSON.stringify({
+          number: cardData.number.replace(/\s/g, ''),
+          holderName: cardData.holderName,
+          expiration: cardData.expiration,
+          cvv: cardData.cvv
+        }));
+
+        // Process card payment
+        const { data, error } = await supabase.functions.invoke('process-payment', {
+          body: {
+            paymentMethod: 'CARD',
+            amount,
+            cardToken,
+            customerData
+          }
+        });
+
+        if (error) throw error;
+
+        if (data.success) {
+          toast({
+            title: "Pagamento aprovado!",
+            description: `Transação: ${data.transactionId}`,
+          });
+        } else {
+          throw new Error(data.error);
+        }
+      } else {
+        // Process Pix payment
+        const { data, error } = await supabase.functions.invoke('process-payment', {
+          body: {
+            paymentMethod: 'PIX',
+            amount,
+            customerData
+          }
+        });
+
+        if (error) throw error;
+
+        if (data.success) {
+          toast({
+            title: "Pix gerado com sucesso!",
+            description: "Use o código abaixo para realizar o pagamento.",
+          });
+          // Here you would display the Pix QR code and copy-paste code
+          console.log('Pix Code:', data.pixCode);
+        } else {
+          throw new Error(data.error);
+        }
+      }
+    } catch (error) {
+      console.error('Payment error:', error);
+      toast({
+        title: "Erro no pagamento",
+        description: "Não foi possível processar o pagamento. Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -306,18 +440,68 @@ const Checkout = () => {
                 </div>
               </Label>
             </div>
-            <div className="flex items-center space-x-2 border rounded-lg p-4 cursor-pointer hover:border-primary">
-              <RadioGroupItem value="Cartao" id="cartao" />
-              <Label htmlFor="cartao" className="flex-1 cursor-pointer">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="h-5 w-5" />
-                    <span className="font-semibold">Cartão de Crédito</span>
-                    <Badge className="bg-[#a30080] text-[#ffce47]">Aprovação imediata</Badge>
+            
+            <div className="border rounded-lg">
+              <div className="flex items-center space-x-2 p-4 cursor-pointer hover:border-primary">
+                <RadioGroupItem value="Cartao" id="cartao" />
+                <Label htmlFor="cartao" className="flex-1 cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-5 w-5" />
+                      <span className="font-semibold">Cartão de Crédito</span>
+                      <Badge className="bg-[#a30080] text-[#ffce47]">Aprovação imediata</Badge>
+                    </div>
+                    <span className="text-lg font-bold">R$ 67,90</span>
                   </div>
-                  <span className="text-lg font-bold">R$ 67,90</span>
+                </Label>
+              </div>
+              
+              {selectedPayment === 'Cartao' && (
+                <div className="px-4 pb-4 space-y-4 border-t pt-4">
+                  <div>
+                    <Label htmlFor="card-number">Número do Cartão</Label>
+                    <Input
+                      id="card-number"
+                      placeholder="0000 0000 0000 0000"
+                      value={cardData.number}
+                      onChange={(e) => handleCardInputChange('number', e.target.value)}
+                      maxLength={19}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="card-holder">Nome do Titular</Label>
+                    <Input
+                      id="card-holder"
+                      placeholder="Nome como está no cartão"
+                      value={cardData.holderName}
+                      onChange={(e) => handleCardInputChange('holderName', e.target.value.toUpperCase())}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="card-expiration">Validade</Label>
+                      <Input
+                        id="card-expiration"
+                        placeholder="MM/AA"
+                        value={cardData.expiration}
+                        onChange={(e) => handleCardInputChange('expiration', e.target.value)}
+                        maxLength={5}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="card-cvv">CVV</Label>
+                      <Input
+                        id="card-cvv"
+                        placeholder="123"
+                        value={cardData.cvv}
+                        onChange={(e) => handleCardInputChange('cvv', e.target.value)}
+                        maxLength={4}
+                        type="password"
+                      />
+                    </div>
+                  </div>
                 </div>
-              </Label>
+              )}
             </div>
           </RadioGroup>
         </div>
@@ -350,8 +534,10 @@ const Checkout = () => {
         <Button 
           className="w-full h-14 text-lg font-bold uppercase"
           style={{ backgroundColor: '#F72E54' }}
+          onClick={processPayment}
+          disabled={isProcessing}
         >
-          Finalizar Compra
+          {isProcessing ? 'Processando...' : 'Finalizar Compra'}
         </Button>
 
         {/* Security Info */}
