@@ -25,23 +25,22 @@ function formatNumber(value: string | undefined): string | undefined {
 }
 
 /**
- * Função que valida a estrutura matemática de um CPF (sem consultar a Receita).
- * (Mantida do código anterior)
+ * Função que valida a estrutura matemática de um CPF.
  */
 function isCpfValid(cpf: string): boolean {
     if (!cpf) return false;
 
-    // 1. Remove caracteres não numéricos e verifica o tamanho
+    // Remove caracteres não numéricos e verifica o tamanho
     const cleanedCpf = cpf.replace(/[^\d]/g, '');
     if (cleanedCpf.length !== 11) return false;
 
-    // 2. Impede sequências repetidas (sabidamente inválidos pela Receita Federal)
+    // Impede sequências repetidas
     if (/^(\d)\1{10}$/.test(cleanedCpf)) return false;
 
     let sum = 0;
     let remainder;
 
-    // 3. Validação do Primeiro Dígito Verificador (DV1)
+    // Validação do Primeiro Dígito Verificador (DV1)
     for (let i = 1; i <= 9; i++) {
         sum += parseInt(cleanedCpf.substring(i - 1, i)) * (11 - i);
     }
@@ -51,7 +50,7 @@ function isCpfValid(cpf: string): boolean {
 
     sum = 0;
 
-    // 4. Validação do Segundo Dígito Verificador (DV2)
+    // Validação do Segundo Dígito Verificador (DV2)
     for (let i = 1; i <= 10; i++) {
         sum += parseInt(cleanedCpf.substring(i - 1, i)) * (12 - i);
     }
@@ -79,7 +78,7 @@ serve(async (req: Request) => {
 
     // Validação inicial das chaves
     if (!EXPFY_PK || !EXPFY_SK) {
-        return new Response(JSON.stringify({ error: 'Configuração de API inválida' }), {
+        return new Response(JSON.stringify({ error: 'Configuração de API inválida. Chaves da ExpfyPay não encontradas.' }), {
             status: 500,
             headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
         });
@@ -90,7 +89,7 @@ serve(async (req: Request) => {
         
         console.log("Processando pagamento ExpfyPay:", data);
         
-        const { paymentMethod, amount, customerData } = data; // CardData removido, foco no PIX
+        const { paymentMethod, amount, customerData } = data;
 
         // --- VALIDAÇÃO DO CPF ---
         const cleanCpf = formatNumber(customerData.cpf);
@@ -108,7 +107,7 @@ serve(async (req: Request) => {
         }
         // -----------------------------
 
-        // === LÓGICA DE PAGAMENTO PIX (Foco no ExpfyPay) ===
+        // === LÓGICA DE PAGAMENTO PIX ===
         if (paymentMethod === 'PIX') {
             
             // Assume-se que o valor deve ser em CENTAVOS (padrão de API)
@@ -116,14 +115,12 @@ serve(async (req: Request) => {
 
             const expfypayBody = {
                 amount: amountInCents,
-                // Dados do cliente/pagador (payer)
                 customer: {
                     name: customerData.name,
                     email: customerData.email,
                     phone: formatNumber(customerData.phone),
-                    document: cleanCpf, // Usando o CPF limpo e validado
+                    document: cleanCpf, // CPF limpo e validado
                 },
-                // ID de rastreio para conciliação
                 reference_id: `SUPABASE_ORDER_${Date.now()}`, 
             };
             
@@ -134,8 +131,7 @@ serve(async (req: Request) => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    // Autenticação: Nomes dos Headers podem mudar.
-                    // Usando o formato padrão "X-Public-Key" e "X-Secret-Key" como palpite.
+                    // HEADERS CONFIRMADOS PELA DOCUMENTAÇÃO!
                     'X-Public-Key': EXPFY_PK, 
                     'X-Secret-Key': EXPFY_SK, 
                     'User-Agent': 'Deno/1.x (Supabase Edge Function)',
@@ -151,8 +147,9 @@ serve(async (req: Request) => {
                 console.error(`ExpfyPay response status: ${response.status}`);
                 console.error(`ExpfyPay error body: ${errorBody}`);
 
-                const errorDetail = errorBody.substring(0, 100);
-                throw new Error(`Falha ao gerar pagamento (Status: ${response.status}. Detalhes: ${errorDetail})`);
+                // Joga o erro para o catch, que retornará o status 500 ao cliente
+                const errorDetail = errorBody.substring(0, 150); 
+                throw new Error(`Falha ao gerar pagamento ExpfyPay (Status: ${response.status}). Detalhes: ${errorDetail}`);
             }
 
             // 6. Se a resposta for OK (Status 200)
@@ -173,7 +170,7 @@ serve(async (req: Request) => {
             
         } else {
             // Se tentar usar outro método sem PIX
-            return new Response(JSON.stringify({ error: 'Unsupported payment method. Only PIX is currently integrated.' }), {
+            return new Response(JSON.stringify({ error: 'Unsupported payment method' }), {
                 status: 400,
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
             });
