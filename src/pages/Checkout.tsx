@@ -17,8 +17,6 @@ const Checkout = () => {
   const [selectedPayment, setSelectedPayment] = useState('Pix');
   const [cepLoading, setCepLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  // ESTADO NOVO E CORRIGIDO: Para capturar e exibir erros da API/Back-end (como o de CPF inválido)
-  const [apiError, setApiError] = useState<{ field: string, message: string } | null>(null);
   const [cardData, setCardData] = useState({
     number: '',
     holderName: '',
@@ -147,8 +145,6 @@ const Checkout = () => {
 
   const processPayment = async () => {
     setIsProcessing(true);
-    setApiError(null); // Limpa qualquer erro de API anterior
-
     
     try {
       // Validate required fields
@@ -178,10 +174,8 @@ const Checkout = () => {
         return;
       }
 
-      // Validate CPF format (11 digits)
+      // Validate CPF format
       if (!validateCPF(cpf)) {
-        // ESTE É O PRIMEIRO PONTO ONDE O ERRO DO CPF PODE SER MOSTRADO
-        setApiError({ field: 'cpf', message: "Por favor, digite um CPF válido com 11 dígitos." });
         toast({
           title: "CPF inválido",
           description: "Por favor, digite um CPF válido com 11 dígitos.",
@@ -233,12 +227,6 @@ const Checkout = () => {
         });
 
         if (error) throw error;
-        
-        // CORREÇÃO: Trata a resposta da Edge Function
-        if (data && data.error) {
-            // Se a Edge Function retornou um erro específico (ex: da ExpfyPay)
-            throw new Error(data.error); 
-        }
 
         if (data.success) {
           toast({
@@ -246,7 +234,7 @@ const Checkout = () => {
             description: `Transação: ${data.transactionId}`,
           });
         } else {
-          throw new Error("Erro desconhecido ao processar Cartão.");
+          throw new Error(data.error);
         }
       } else {
         // Process Pix payment
@@ -260,40 +248,22 @@ const Checkout = () => {
 
         if (error) throw error;
 
-        // CORREÇÃO: Trata a resposta da Edge Function (Pix)
-        if (data && data.error) {
-            // Se a Edge Function retornou um erro específico (ex: da ExpfyPay ou CPF inválido)
-            throw new Error(data.error); 
-        }
-
         if (data.success) {
           toast({
             title: "Pix gerado com sucesso!",
             description: "Use o código abaixo para realizar o pagamento.",
           });
           // Here you would display the Pix QR code and copy-paste code
-          console.log('Pix Data:', data.paymentData);
+          console.log('Pix Code:', data.pixCode);
         } else {
-          throw new Error("Erro desconhecido ao gerar Pix.");
+          throw new Error(data.error);
         }
       }
-    // CORREÇÃO: O bloco catch agora trata erros detalhados.
     } catch (error) {
       console.error('Payment error:', error);
-      
-      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
-      
-      // Se a mensagem de erro contiver a palavra "CPF" (vinda da Edge Function: "O CPF fornecido é inválido...")
-      if (errorMessage.toLowerCase().includes('cpf')) {
-          setApiError({ field: 'cpf', message: errorMessage });
-      } else {
-          // Trata outros erros da API, mas sem destacar um campo específico
-          setApiError({ field: 'general', message: errorMessage });
-      }
-      
       toast({
         title: "Erro no pagamento",
-        description: errorMessage, // Exibe a mensagem de erro detalhada da API/Back-end
+        description: "Não foi possível processar o pagamento. Tente novamente.",
         variant: "destructive",
       });
     } finally {
@@ -358,7 +328,7 @@ const Checkout = () => {
           <div className="flex items-center justify-center gap-2 mb-2">
             <Zap className="h-5 w-5" />
             <span className="font-bold uppercase text-sm">Oferta Relâmpago</span>
-            </div>
+          </div>
           <div className="text-3xl font-bold">{formatTime(timeLeft)}</div>
         </div>
 
@@ -450,20 +420,15 @@ const Checkout = () => {
                 <Input id="phone" placeholder="(21) 99999-9999" />
               </div>
               <div>
-                <Label htmlFor="cpf" className={apiError?.field === 'cpf' ? 'text-red-500' : ''}>CPF</Label>
+                <Label htmlFor="cpf">CPF</Label>
                 <Input 
                   id="cpf" 
                   placeholder="000.000.000-00"
                   maxLength={14}
-                    className={apiError?.field === 'cpf' ? 'border-red-500 focus:border-red-500' : ''}
                   onChange={(e) => {
                     e.target.value = formatCPF(e.target.value);
-                        setApiError(null); // Limpa o erro ao digitar
                   }}
                 />
-                {apiError?.field === 'cpf' && (
-                    <p className="text-red-500 text-sm mt-1 font-medium">{apiError.message}</p>
-                )}
               </div>
             </div>
           </div>
@@ -632,13 +597,6 @@ const Checkout = () => {
         >
           {isProcessing ? 'Processando...' : 'Finalizar Compra'}
         </Button>
-
-        {/* ERRO GERAL DA API (Se o erro não for de CPF) */}
-        {apiError?.field === 'general' && (
-            <div className="mt-4 text-center text-red-500 font-medium">
-                Erro: {apiError.message}
-            </div>
-        )}
 
         {/* Security Info */}
         <div className="mt-6 text-center text-sm text-gray-600">
