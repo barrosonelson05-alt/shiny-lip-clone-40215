@@ -1,20 +1,16 @@
-// process-payment/index.ts
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-
 // --- 1. CONFIGURAÇÃO EXPFYPAY ---
 
-// Variáveis de ambiente da ExpfyPay (Devem ser configuradas nas Secrets do Supabase)
-// Usamos URL_API_EXPFY, conforme corrigido
+// Variáveis de ambiente da ExpfyPay
 const EXPFY_API_URL_SECRET = Deno.env.get('URL_API_EXPFY'); 
 const EXPFY_PK = Deno.env.get('EXPFY_PK'); // Chave Pública (pk_...)
 const EXPFY_SK = Deno.env.get('EXPFY_SK'); // Chave Secreta (sk_...)
 
-// Define o fallback seguro da URL Base
+// Fallback seguro (URL base correta)
 const FALLBACK_BASE_URL = 'https://expfypay.com/api/v1';
 
-// Normaliza a URL base: usa a secret se for uma URL válida, caso contrário, usa o fallback.
+// Usa o secret, mas se for nulo, vazio, ou inválido (não URL), usa o fallback.
 const resolvedBaseUrl = 
-  (EXPFY_API_URL_SECRET && /^https?:\/\//i.test(EXPFY_API_URL_SECRET)) 
+  (EXPFY_API_URL_SECRET && EXPFY_API_URL_SECRET.startsWith('http')) 
     ? EXPFY_API_URL_SECRET.replace(/\/$/, '') 
     : FALLBACK_BASE_URL;
 
@@ -22,9 +18,9 @@ const resolvedBaseUrl =
 const EXPFY_PAYMENTS_ENDPOINT = `${resolvedBaseUrl}/pagamentos`;
 
 if (resolvedBaseUrl === FALLBACK_BASE_URL) {
-  console.warn(`WARNING: Secret 'URL_API_EXPFY' é inválida ou não foi definida. Usando fallback: ${FALLBACK_BASE_URL}`);
+  console.warn(`WARNING: Secret 'URL_API_EXPFY' não está definida ou é inválida. Usando fallback: ${FALLBACK_BASE_URL}`);
 }
-
+// ... restante do código (mantido) ...
 // --- 2. FUNÇÕES AUXILIARES ---
 
 // Função para formatar o CPF/Telefone removendo caracteres não numéricos
