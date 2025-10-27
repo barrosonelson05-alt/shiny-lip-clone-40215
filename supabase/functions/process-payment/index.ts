@@ -9,8 +9,16 @@ const EXPFY_API_URL = Deno.env.get('EXPFY_API_URL') || 'https://expfypay.com/api
 const EXPFY_PK = Deno.env.get('EXPFY_PK'); // Chave Pública (pk_...)
 const EXPFY_SK = Deno.env.get('EXPFY_SK'); // Chave Secreta (sk_...)
 
+// Normaliza a URL base (fallback se secret estiver incorreta)
+const resolvedBaseUrl = /^https?:\/\//i.test(EXPFY_API_URL ?? '')
+  ? EXPFY_API_URL.replace(/\/$/, '')
+  : 'https://expfypay.com/api/v1';
+if (resolvedBaseUrl !== (EXPFY_API_URL || '')) {
+  console.warn('EXPFY_API_URL inválida. Usando fallback padrão:', resolvedBaseUrl);
+}
+
 // Endpoint de criação de pagamento PIX da ExpfyPay
-const EXPFY_PAYMENTS_ENDPOINT = `${EXPFY_API_URL}/payments`;
+const EXPFY_PAYMENTS_ENDPOINT = `${resolvedBaseUrl}/payments`;
 
 if (!EXPFY_PK || !EXPFY_SK) {
     console.error("ERRO: As chaves EXPFY_PK e EXPFY_SK não estão configuradas nas Secrets do Supabase.");
