@@ -177,13 +177,14 @@ serve(async (req: Request) => {
         }
 
     } catch (error) {
-        console.error("Payment processing error:", error.message);
+        const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+        console.error("Payment processing error:", errorMessage);
 
         // Retorna uma resposta de erro genérica ao front-end
         return new Response(
             JSON.stringify({ 
                 error: 'Internal Server Error', 
-                message: error.message 
+                message: errorMessage 
             }),
             {
                 status: 500,
