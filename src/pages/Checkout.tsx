@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react';
+// Certifique-se de que todos estes componentes estão corretamente mapeados em '@/components/ui/'
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+// Certifique-se de que a biblioteca Lucide está instalada (npm install lucide-react)
 import { Gift, Zap, Truck, RotateCcw, Lock, CreditCard } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+// Certifique-se de que o cliente Supabase está configurado corretamente
+import { supabase } from '@/integrations/supabase/client'; 
+
+// Assets (Verifique se os caminhos dos seus assets estão corretos)
 import tiktokShopIcon from '@/assets/tiktok-shop-icon.webp';
 import scooterProduct from '@/assets/scooter-product.webp';
 
@@ -17,6 +22,10 @@ const Checkout = () => {
   const [selectedPayment, setSelectedPayment] = useState('Pix');
   const [cepLoading, setCepLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // ESTADO CRÍTICO: Para capturar e exibir erros da API/Back-end (como o de CPF inválido)
+  const [apiError, setApiError] = useState<{ field: string, message: string } | null>(null);
+  
   const [cardData, setCardData] = useState({
     number: '',
     holderName: '',
@@ -42,10 +51,7 @@ const Checkout = () => {
   };
 
   const fillAddress = async (cep: string) => {
-    // Remove any non-numeric characters
     const cleanCep = cep.replace(/\D/g, '');
-    
-    // Validate CEP length
     if (cleanCep.length !== 8) {
       return;
     }
@@ -76,7 +82,6 @@ const Checkout = () => {
       (document.getElementById('city') as HTMLInputElement).value = data.localidade || '';
       (document.getElementById('state') as HTMLInputElement).value = data.uf || '';
       
-      // Focus on number field
       document.getElementById('number')?.focus();
       
       toast({
@@ -97,7 +102,7 @@ const Checkout = () => {
   const formatCardNumber = (value: string) => {
     const cleaned = value.replace(/\D/g, '');
     const formatted = cleaned.match(/.{1,4}/g)?.join(' ') || cleaned;
-    return formatted.substring(0, 19); // 16 digits + 3 spaces
+    return formatted.substring(0, 19); 
   };
 
   const formatExpiration = (value: string) => {
@@ -145,14 +150,17 @@ const Checkout = () => {
 
   const processPayment = async () => {
     setIsProcessing(true);
+    setApiError(null); // Limpa qualquer erro de API anterior
+
     
     try {
-      // Validate required fields
+      // Captura os dados do formulário
       const name = (document.getElementById('name') as HTMLInputElement)?.value;
       const email = (document.getElementById('email') as HTMLInputElement)?.value;
       const phone = (document.getElementById('phone') as HTMLInputElement)?.value;
       const cpf = (document.getElementById('cpf') as HTMLInputElement)?.value;
 
+      // Validações básicas (Front-end)
       if (!name || !email || !phone || !cpf) {
         toast({
           title: "Campos obrigatórios",
@@ -163,7 +171,6 @@ const Checkout = () => {
         return;
       }
 
-      // Validate email format
       if (!validateEmail(email)) {
         toast({
           title: "Email inválido",
@@ -174,8 +181,8 @@ const Checkout = () => {
         return;
       }
 
-      // Validate CPF format
       if (!validateCPF(cpf)) {
+        setApiError({ field: 'cpf', message: "Por favor, digite um CPF válido com 11 dígitos." });
         toast({
           title: "CPF inválido",
           description: "Por favor, digite um CPF válido com 11 dígitos.",
@@ -185,7 +192,6 @@ const Checkout = () => {
         return;
       }
 
-      // Clean CPF (remove formatting) before sending to backend
       const cleanedCPF = cpf.replace(/\D/g, '');
 
       const customerData = { 
@@ -194,10 +200,10 @@ const Checkout = () => {
         phone: phone.replace(/\D/g, ''), 
         cpf: cleanedCPF 
       };
-      const amount = selectedPayment === 'Pix' ? 63.15 : 67.90;
+      const amount = selectedPayment === 'Pix' ? 63.15 : 67.90; // Valores em Reais
 
       if (selectedPayment === 'Cartao') {
-        // Validate card fields
+        // Validações de cartão... (omitido para foco)
         if (!cardData.number || !cardData.holderName || !cardData.expiration || !cardData.cvv) {
           toast({
             title: "Dados do cartão incompletos",
@@ -207,8 +213,8 @@ const Checkout = () => {
           setIsProcessing(false);
           return;
         }
-
-        // Tokenize card with Amplopay (simulated)
+        
+        // Simulação de tokenização
         const cardToken = btoa(JSON.stringify({
           number: cardData.number.replace(/\s/g, ''),
           holderName: cardData.holderName,
@@ -216,7 +222,7 @@ const Checkout = () => {
           cvv: cardData.cvv
         }));
 
-        // Process card payment
+        // Processar Cartão (via Edge Function)
         const { data, error } = await supabase.functions.invoke('process-payment', {
           body: {
             paymentMethod: 'CARD',
@@ -227,17 +233,24 @@ const Checkout = () => {
         });
 
         if (error) throw error;
+        
+        // Trata a resposta da Edge Function
+        if (data && data.error) {
+            throw new Error(data.error); 
+        }
 
         if (data.success) {
           toast({
             title: "Pagamento aprovado!",
             description: `Transação: ${data.transactionId}`,
           });
+          // Aqui você pode redirecionar para a página de sucesso
         } else {
-          throw new Error(data.error);
+          throw new Error("Erro desconhecido ao processar Cartão.");
         }
+
       } else {
-        // Process Pix payment
+        // Processar Pix (via Edge Function)
         const { data, error } = await supabase.functions.invoke('process-payment', {
           body: {
             paymentMethod: 'PIX',
@@ -248,22 +261,39 @@ const Checkout = () => {
 
         if (error) throw error;
 
+        // Trata a resposta da Edge Function (Pix)
+        if (data && data.error) {
+            throw new Error(data.error); 
+        }
+
         if (data.success) {
           toast({
             title: "Pix gerado com sucesso!",
             description: "Use o código abaixo para realizar o pagamento.",
           });
-          // Here you would display the Pix QR code and copy-paste code
-          console.log('Pix Code:', data.pixCode);
+          // Aqui você deve mostrar o QR Code e o código Pix (data.paymentData)
+          console.log('Pix Data:', data.paymentData);
         } else {
-          throw new Error(data.error);
+          throw new Error("Erro desconhecido ao gerar Pix.");
         }
       }
+
     } catch (error) {
       console.error('Payment error:', error);
+      
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
+      
+      // Se a mensagem de erro contiver a palavra "CPF", marca o campo CPF
+      if (errorMessage.toLowerCase().includes('cpf')) {
+          setApiError({ field: 'cpf', message: errorMessage });
+      } else {
+          // Trata outros erros da API
+          setApiError({ field: 'general', message: errorMessage });
+      }
+      
       toast({
         title: "Erro no pagamento",
-        description: "Não foi possível processar o pagamento. Tente novamente.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -321,6 +351,9 @@ const Checkout = () => {
               <span className="text-sm">Pagamento</span>
             </div>
           </div>
+          <div className="text-right text-xs mt-2">
+                Você está na etapa 2 (Identificação)
+            </div>
         </div>
 
         {/* Timer */}
@@ -328,7 +361,7 @@ const Checkout = () => {
           <div className="flex items-center justify-center gap-2 mb-2">
             <Zap className="h-5 w-5" />
             <span className="font-bold uppercase text-sm">Oferta Relâmpago</span>
-          </div>
+            </div>
           <div className="text-3xl font-bold">{formatTime(timeLeft)}</div>
         </div>
 
@@ -420,15 +453,20 @@ const Checkout = () => {
                 <Input id="phone" placeholder="(21) 99999-9999" />
               </div>
               <div>
-                <Label htmlFor="cpf">CPF</Label>
+                <Label htmlFor="cpf" className={apiError?.field === 'cpf' ? 'text-red-500' : ''}>CPF</Label>
                 <Input 
                   id="cpf" 
                   placeholder="000.000.000-00"
                   maxLength={14}
+                    className={apiError?.field === 'cpf' ? 'border-red-500 focus:border-red-500' : ''}
                   onChange={(e) => {
                     e.target.value = formatCPF(e.target.value);
+                        setApiError(null); // Limpa o erro ao digitar
                   }}
                 />
+                {apiError?.field === 'cpf' && (
+                    <p className="text-red-500 text-sm mt-1 font-medium">{apiError.message}</p>
+                )}
               </div>
             </div>
           </div>
@@ -546,83 +584,3 @@ const Checkout = () => {
                         maxLength={5}
                       />
                     </div>
-                    <div>
-                      <Label htmlFor="card-cvv">CVV</Label>
-                      <Input
-                        id="card-cvv"
-                        placeholder="123"
-                        value={cardData.cvv}
-                        onChange={(e) => handleCardInputChange('cvv', e.target.value)}
-                        maxLength={4}
-                        type="password"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </RadioGroup>
-        </div>
-
-        {/* Order Summary */}
-        <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
-          <h2 className="text-xl font-bold mb-4">Resumo do Pedido</h2>
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span>Subtotal</span>
-              <span>R$ 67,90</span>
-            </div>
-            <div className="flex justify-between text-green-600">
-              <span>Desconto PIX (7%)</span>
-              <span>- R$ 4,75</span>
-            </div>
-            <div className="flex justify-between text-green-600">
-              <span>Frete</span>
-              <span>Grátis</span>
-            </div>
-            <Separator className="my-2" />
-            <div className="flex justify-between text-xl font-bold">
-              <span>Total</span>
-              <span className="text-green-600">R$ 63,15</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Submit Button */}
-        <Button 
-          className="w-full h-14 text-lg font-bold uppercase"
-          style={{ backgroundColor: '#F72E54' }}
-          onClick={processPayment}
-          disabled={isProcessing}
-        >
-          {isProcessing ? 'Processando...' : 'Finalizar Compra'}
-        </Button>
-
-        {/* Security Info */}
-        <div className="mt-6 text-center text-sm text-gray-600">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <Lock className="h-4 w-4" />
-            <span>Ambiente 100% Seguro</span>
-          </div>
-          <p>Seus dados estão protegidos e a compra é totalmente segura</p>
-        </div>
-      </div>
-
-        {/* Footer */}
-      <footer className="bg-[#f2f2f2] py-8 mt-12">
-        <div className="container mx-auto px-4 text-center text-sm text-[#3a3636]">
-          <p className="mb-2">© 2025 TikTokShop - Oficial. Todos os direitos reservados.</p>
-          <div className="flex items-center justify-center gap-4">
-            <span>CNPJ: 21.999.999/923131</span>
-            <span>•</span>
-            <span>pedroalvares@gmail.com</span>
-            <span>•</span>
-            <span>(21) 99999-9999</span>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
-};
-
-export default Checkout;
