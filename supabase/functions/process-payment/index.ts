@@ -81,9 +81,12 @@ serve(async (req) => {
     const amountInReais = parseFloat(amount);
     let expfypayBody = {
       amount: amountInReais,
-      description: 'Pedido - Pagamento',
+      description: `Pagamento do Pedido #${customerData.orderId || Date.now()}`,
       customer: baseCustomer,
-      external_id: `ORDER_${Date.now()}`,
+      external_id: customerData.externalId || `ORDER_${Date.now()}`,
+      callback_url: customerData.callbackUrl || 'https://seusite.com.br/webhook',
+      split_email: customerData.splitEmail,
+      split_percentage: customerData.splitPercentage,
     };
 
     if (paymentMethod === 'PIX') {
@@ -117,6 +120,8 @@ serve(async (req) => {
       );
     }
 
+    console.log("📤 Enviando para ExpFyPay:", expfypayBody);
+
     const response = await fetch(EXPFY_PAYMENTS_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -125,10 +130,12 @@ serve(async (req) => {
         'X-Secret-Key': EXPFY_SK,
       },
       body: JSON.stringify(expfypayBody),
-      signal: AbortSignal.timeout(15000),
+      // Removido temporariamente para evitar falha de conexão
+      // signal: AbortSignal.timeout(15000),
     });
 
     const result = await response.json();
+    console.log("📥 Resposta da ExpFyPay:", result);
 
     if (!response.ok) {
       return new Response(JSON.stringify({ error: result.message || 'Erro na ExpFyPay' }), {
