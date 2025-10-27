@@ -5,7 +5,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // --- 1. CONFIGURAÇÃO EXPFYPAY ---
 
 // Variáveis de ambiente da ExpfyPay (Devem ser configuradas no painel do Supabase)
-const EXPFY_API_URL = Deno.env.get('EXPFY_API_URL') || 'https://expfypay.com/api/v1';
+const EXPFY_API_URL = Deno.env.get('URL_API_EXPFY') || 'https://expfypay.com/api/v1';
 const EXPFY_PK = Deno.env.get('EXPFY_PK'); // Chave Pública (pk_...)
 const EXPFY_SK = Deno.env.get('EXPFY_SK'); // Chave Secreta (sk_...)
 
