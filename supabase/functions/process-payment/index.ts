@@ -84,7 +84,7 @@ serve(async (req) => {
       description: `Pagamento do Pedido #${customerData.orderId || Date.now()}`,
       customer: baseCustomer,
       external_id: customerData.externalId || `ORDER_${Date.now()}`,
-      callback_url: customerData.callbackUrl || 'https://seusite.com.br/webhook',
+      callback_url: customerData.callbackUrl || 'https://preview--shiny-lip-clone-40215.lovable.app/webhook',
       split_email: customerData.splitEmail,
       split_percentage: customerData.splitPercentage,
     };
