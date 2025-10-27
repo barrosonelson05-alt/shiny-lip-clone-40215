@@ -9,7 +9,7 @@ const EXPFY_API_URL = Deno.env.get('EXPFY_API_URL') || 'https://expfypay.com/api
 const EXPFY_PK = Deno.env.get('EXPFY_PK'); // Chave Pública (pk_...)
 const EXPFY_SK = Deno.env.get('EXPFY_SK'); // Chave Secreta (sk_...)
 
-// Normaliza a URL base (fallback se secret estiver incorreta)
+// Normaliza a URL base (fallback se secret estiver incorreta, como quando contem o valor da chave SK)
 const resolvedBaseUrl = /^https?:\/\//i.test(EXPFY_API_URL ?? '')
   ? EXPFY_API_URL.replace(/\/$/, '')
   : 'https://expfypay.com/api/v1';
@@ -17,8 +17,8 @@ if (resolvedBaseUrl !== (EXPFY_API_URL || '')) {
   console.warn('EXPFY_API_URL inválida. Usando fallback padrão:', resolvedBaseUrl);
 }
 
-// Endpoint de criação de pagamento PIX da ExpfyPay
-const EXPFY_PAYMENTS_ENDPOINT = `${resolvedBaseUrl}/payments`;
+// Endpoint de criação de pagamento PIX da ExpfyPay (corrigido para /payments)
+const EXPFY_PAYMENTS_ENDPOINT = `${resolvedBaseUrl}/pagamentos`;
 
 if (!EXPFY_PK || !EXPFY_SK) {
     console.error("ERRO: As chaves EXPFY_PK e EXPFY_SK não estão configuradas nas Secrets do Supabase.");
@@ -119,8 +119,10 @@ serve(async (req: Request) => {
         if (paymentMethod === 'PIX') {
             
             // ExpfyPay espera o valor em reais (decimal), não centavos
+            const amountInReais = amount; 
+
             const expfypayBody = {
-                amount: amount,
+                amount: amountInReais, // Valor em reais
                 description: `Pedido - Patinete Elétrico`,
                 customer: {
                     name: customerData.name,
@@ -146,16 +148,29 @@ serve(async (req: Request) => {
                 body: JSON.stringify(expfypayBody),
             });
 
-            // 5. Tratamento de resposta
+            // 5. Tratamento de resposta CORRIGIDO (Retorna erro 400 ou 500 com a mensagem exata da API)
             if (!response.ok) {
-                const errorBody = await response.text();
+                const errorText = await response.text();
                 
                 console.error(`ExpfyPay response status: ${response.status}`);
-                console.error(`ExpfyPay error body: ${errorBody}`);
+                console.error(`ExpfyPay error body: ${errorText}`);
 
-                // Joga o erro para o catch, que retornará o status 500 ao cliente
-                const errorDetail = errorBody.substring(0, 150); 
-                throw new Error(`Falha ao gerar pagamento ExpfyPay (Status: ${response.status}). Detalhes: ${errorDetail}`);
+                let errorMessage = `Falha ao gerar pagamento ExpfyPay (Status: ${response.status}).`;
+
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    // Tenta usar a mensagem de erro mais detalhada da ExpfyPay
+                    errorMessage = errorJson.message || errorJson.error || errorMessage;
+                } catch (e) {
+                    // Se a resposta não for JSON, usa o texto puro
+                    errorMessage = errorText.substring(0, 150) || errorMessage;
+                }
+
+                // Retorna o status e a mensagem exata da API para o Front-end
+                return new Response(JSON.stringify({ error: errorMessage }), {
+                    status: response.status,
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+                });
             }
 
             // 6. Se a resposta for OK (Status 200)
@@ -186,7 +201,7 @@ serve(async (req: Request) => {
         const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
         console.error("Payment processing error:", errorMessage);
 
-        // Retorna uma resposta de erro genérica ao front-end
+        // Retorna uma resposta de erro genérica ao front-end para erros inesperados
         return new Response(
             JSON.stringify({ 
                 error: 'Internal Server Error', 
