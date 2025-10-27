@@ -9,8 +9,8 @@ const EXPFY_API_URL = Deno.env.get('EXPFY_API_URL') || 'https://expfypay.com/api
 const EXPFY_PK = Deno.env.get('EXPFY_PK'); // Chave Pública (pk_...)
 const EXPFY_SK = Deno.env.get('EXPFY_SK'); // Chave Secreta (sk_...)
 
-// Endpoint de criação de PIX da ExpfyPay
-const EXPFY_PIX_ENDPOINT = `${EXPFY_API_URL}/pix`; 
+// Endpoint de criação de pagamento PIX da ExpfyPay
+const EXPFY_PAYMENTS_ENDPOINT = `${EXPFY_API_URL}/payments`;
 
 if (!EXPFY_PK || !EXPFY_SK) {
     console.error("ERRO: As chaves EXPFY_PK e EXPFY_SK não estão configuradas nas Secrets do Supabase.");
@@ -110,24 +110,22 @@ serve(async (req: Request) => {
         // === LÓGICA DE PAGAMENTO PIX ===
         if (paymentMethod === 'PIX') {
             
-            // Assume-se que o valor deve ser em CENTAVOS (padrão de API)
-            const amountInCents = Math.round(amount * 100); 
-
+            // ExpfyPay espera o valor em reais (decimal), não centavos
             const expfypayBody = {
-                amount: amountInCents,
+                amount: amount,
+                description: `Pedido - Patinete Elétrico`,
                 customer: {
                     name: customerData.name,
-                    email: customerData.email,
-                    phone: formatNumber(customerData.phone),
                     document: cleanCpf, // CPF limpo e validado
+                    email: customerData.email,
                 },
-                reference_id: `SUPABASE_ORDER_${Date.now()}`, 
+                external_id: `ORDER_${Date.now()}`,
             };
             
             console.log("ExpfyPay Request Body:", JSON.stringify(expfypayBody));
             
             // 4. Chamada à API ExpfyPay
-            const response = await fetch(EXPFY_PIX_ENDPOINT, {
+            const response = await fetch(EXPFY_PAYMENTS_ENDPOINT, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
