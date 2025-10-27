@@ -130,21 +130,27 @@ serve(async (req) => {
         'X-Secret-Key': EXPFY_SK,
       },
       body: JSON.stringify(expfypayBody),
-      // Removido temporariamente para evitar falha de conexão
-      // signal: AbortSignal.timeout(15000),
     });
 
     const result = await response.json();
     console.log("📥 Resposta da ExpFyPay:", result);
 
-    if (!response.ok) {
+    if (!response.ok || !result.success) {
       return new Response(JSON.stringify({ error: result.message || 'Erro na ExpFyPay' }), {
         status: response.status,
         headers: { 'Content-Type': 'application/json', ...corsHeaders },
       });
     }
 
-    return new Response(JSON.stringify({ success: true, paymentData: result }), {
+    return new Response(JSON.stringify({
+      success: true,
+      transactionId: result.data.transaction_id,
+      externalId: result.data.external_id,
+      qrCodeUrl: result.data.qr_code_url,
+      qrCodeImage: result.data.qr_code_image,
+      amount: result.data.amount,
+      status: result.data.status,
+    }), {
       status: 200,
       headers: { 'Content-Type': 'application/json', ...corsHeaders },
     });
