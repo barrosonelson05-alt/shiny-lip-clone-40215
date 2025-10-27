@@ -17,7 +17,7 @@ const Checkout = () => {
   const [selectedPayment, setSelectedPayment] = useState('Pix');
   const [cepLoading, setCepLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  // NOVO ESTADO: Para capturar e exibir erros específicos de CPF ou da API ExpfyPay
+  // ESTADO NOVO E CORRIGIDO: Para capturar e exibir erros da API/Back-end (como o de CPF inválido)
   const [apiError, setApiError] = useState<{ field: string, message: string } | null>(null);
   const [cardData, setCardData] = useState({
     number: '',
@@ -180,6 +180,8 @@ const Checkout = () => {
 
       // Validate CPF format (11 digits)
       if (!validateCPF(cpf)) {
+        // ESTE É O PRIMEIRO PONTO ONDE O ERRO DO CPF PODE SER MOSTRADO
+        setApiError({ field: 'cpf', message: "Por favor, digite um CPF válido com 11 dígitos." });
         toast({
           title: "CPF inválido",
           description: "Por favor, digite um CPF válido com 11 dígitos.",
@@ -281,9 +283,12 @@ const Checkout = () => {
       
       const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
       
-      // Se a mensagem de erro contiver a palavra "CPF" (vinda da Edge Function ou da validação interna)
+      // Se a mensagem de erro contiver a palavra "CPF" (vinda da Edge Function: "O CPF fornecido é inválido...")
       if (errorMessage.toLowerCase().includes('cpf')) {
           setApiError({ field: 'cpf', message: errorMessage });
+      } else {
+          // Trata outros erros da API, mas sem destacar um campo específico
+          setApiError({ field: 'general', message: errorMessage });
       }
       
       toast({
@@ -299,23 +304,130 @@ const Checkout = () => {
   return (
     <div className="min-h-screen bg-[#f9f9fa]">
       {/* Header */}
-      {/* ... (código do header omitido para brevidade) ... */}
+      <header className="bg-white border-b">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <img src={tiktokShopIcon} alt="TikTok Shop" className="w-8 h-8" />
+              <span className="font-bold text-lg">TikTokShop - Oficial</span>
+            </div>
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              <Lock className="h-4 w-4" />
+              <span>Compra Segura</span>
+            </div>
+          </div>
+        </div>
+      </header>
 
       {/* Advice Bar */}
-      {/* ... (código da advice bar omitido para brevidade) ... */}
+      <div className="bg-[#50b3e8] text-white py-2">
+        <div className="container mx-auto px-4 text-center text-sm">
+          ✓ Frete grátis em todo Brasil • ✓ Pagamento 100% Seguro • ✓ Garantia de 30 dias
+        </div>
+      </div>
 
       <div className="container mx-auto px-4 py-6 max-w-4xl">
         {/* Progress Steps */}
-        {/* ... (código das etapas omitido para brevidade) ... */}
+        <div className="bg-black text-white rounded-lg p-4 mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-white text-black rounded-full flex items-center justify-center font-bold">
+                1
+              </div>
+              <span className="text-sm">Carrinho</span>
+            </div>
+            <div className="flex-1 h-1 bg-gray-700 mx-4"></div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-white text-black rounded-full flex items-center justify-center font-bold">
+                2
+              </div>
+              <span className="text-sm">Identificação</span>
+            </div>
+            <div className="flex-1 h-1 bg-gray-700 mx-4"></div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center font-bold">
+                3
+              </div>
+              <span className="text-sm">Pagamento</span>
+            </div>
+          </div>
+        </div>
 
         {/* Timer */}
-        {/* ... (código do timer omitido para brevidade) ... */}
+        <div className="bg-[#50b3e8] text-[#283368] rounded-lg p-4 mb-6 text-center">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Zap className="h-5 w-5" />
+            <span className="font-bold uppercase text-sm">Oferta Relâmpago</span>
+            </div>
+          <div className="text-3xl font-bold">{formatTime(timeLeft)}</div>
+        </div>
 
         {/* Product Info */}
-        {/* ... (código do produto omitido para brevidade) ... */}
+        <div className="bg-white rounded-lg p-6 mb-6 shadow-sm">
+          <div className="flex gap-4">
+            <img 
+              src={scooterProduct} 
+              alt="Patinete Elétrico" 
+              className="w-24 h-24 rounded-lg flex-shrink-0 object-cover"
+            />
+            <div className="flex-1">
+              <h3 className="font-bold text-lg mb-2">
+                Patinete Elétrico Scooter De Alumínio Com Bluetooth 30km/h
+              </h3>
+              <div className="flex items-center gap-4 mb-2">
+                <span className="text-2xl font-bold text-green-600">R$ 67,90</span>
+                <span className="text-sm line-through text-gray-500">R$ 619,90</span>
+                <Badge className="bg-[#FE5D38] text-white">Economize até 85%</Badge>
+              </div>
+              <div className="flex gap-2">
+                <Badge className="bg-[#a30080] text-[#ffce47]">
+                  Pagamento instantâneo no Pix
+                </Badge>
+                <Badge className="bg-[#2ecc71] text-white">7% OFF NO PIX</Badge>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Priority Benefits */}
-        {/* ... (código dos benefícios omitido para brevidade) ... */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <Truck className="h-6 w-6 text-green-600 flex-shrink-0" />
+              <div>
+                <h4 className="font-bold mb-1">Entrega com Seguro Grátis</h4>
+                <p className="text-sm text-gray-600">
+                  Nossos produtos são entregues via Correios, assegurando uma entrega segura
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <RotateCcw className="h-6 w-6 text-blue-600 flex-shrink-0" />
+              <div>
+                <h4 className="font-bold mb-1">Satisfação ou seu Valor de Volta</h4>
+                <p className="text-sm text-gray-600">
+                  Se o produto entregue chegar com algum defeito ou erro
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-lg p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <Gift className="h-6 w-6 text-purple-600 flex-shrink-0" />
+              <div>
+                <h4 className="font-bold mb-1">Pedro Álvares</h4>
+                <p className="text-sm text-gray-600">Chegou tudo certinho</p>
+                <div className="flex gap-1 mt-1">
+                  {[...Array(5)].map((_, i) => (
+                    <span key={i} className="text-[#ffd500]">★</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Payment Form */}
         <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
@@ -358,20 +470,158 @@ const Checkout = () => {
 
           <Separator className="my-6" />
 
-          {/* Endereço de Entrega */}
-          {/* ... (código do endereço omitido para brevidade) ... */}
+          <h2 className="text-xl font-bold mb-4">Endereço de Entrega</h2>
           
+          <div className="space-y-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="cep">CEP</Label>
+                <Input 
+                  id="cep" 
+                  placeholder="00000-000" 
+                  maxLength={9}
+                  onBlur={(e) => fillAddress(e.target.value)}
+                  disabled={cepLoading}
+                />
+                {cepLoading && <p className="text-xs text-muted-foreground mt-1">Buscando endereço...</p>}
+              </div>
+              <div>
+                <Label htmlFor="address">Endereço</Label>
+                <Input id="address" placeholder="Rua" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="number">Número</Label>
+                <Input id="number" placeholder="Número" />
+              </div>
+              <div>
+                <Label htmlFor="complement">Complemento</Label>
+                <Input id="complement" placeholder="Apto, bloco, etc (opcional)" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <Label htmlFor="neighborhood">Bairro</Label>
+                <Input id="neighborhood" placeholder="Bairro" />
+              </div>
+              <div>
+                <Label htmlFor="city">Cidade</Label>
+                <Input id="city" placeholder="Cidade" />
+              </div>
+              <div>
+                <Label htmlFor="state">Estado</Label>
+                <Input id="state" placeholder="UF" />
+              </div>
+            </div>
+          </div>
+
           <Separator className="my-6" />
 
           <h2 className="text-xl font-bold mb-4">Forma de Pagamento</h2>
           
-          {/* RadioGroup e Campos de Cartão */}
-          {/* ... (código do pagamento omitido para brevidade) ... */}
-
+          <RadioGroup value={selectedPayment} onValueChange={setSelectedPayment} className="space-y-3">
+            <div className="flex items-center space-x-2 border rounded-lg p-4 cursor-pointer hover:border-primary">
+              <RadioGroupItem value="Pix" id="pix" />
+              <Label htmlFor="pix" className="flex-1 cursor-pointer">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold">Pix</span>
+                    <Badge className="bg-[#2ecc71] text-white">7% OFF</Badge>
+                  </div>
+                  <span className="text-lg font-bold">R$ 63,15</span>
+                </div>
+              </Label>
+            </div>
+            
+            <div className="border rounded-lg">
+              <div className="flex items-center space-x-2 p-4 cursor-pointer hover:border-primary">
+                <RadioGroupItem value="Cartao" id="cartao" />
+                <Label htmlFor="cartao" className="flex-1 cursor-pointer">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CreditCard className="h-5 w-5" />
+                      <span className="font-semibold">Cartão de Crédito</span>
+                      <Badge className="bg-[#a30080] text-[#ffce47]">Aprovação imediata</Badge>
+                    </div>
+                    <span className="text-lg font-bold">R$ 67,90</span>
+                  </div>
+                </Label>
+              </div>
+              
+              {selectedPayment === 'Cartao' && (
+                <div className="px-4 pb-4 space-y-4 border-t pt-4">
+                  <div>
+                    <Label htmlFor="card-number">Número do Cartão</Label>
+                    <Input
+                      id="card-number"
+                      placeholder="0000 0000 0000 0000"
+                      value={cardData.number}
+                      onChange={(e) => handleCardInputChange('number', e.target.value)}
+                      maxLength={19}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="card-holder">Nome do Titular</Label>
+                    <Input
+                      id="card-holder"
+                      placeholder="Nome como está no cartão"
+                      value={cardData.holderName}
+                      onChange={(e) => handleCardInputChange('holderName', e.target.value.toUpperCase())}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="card-expiration">Validade</Label>
+                      <Input
+                        id="card-expiration"
+                        placeholder="MM/AA"
+                        value={cardData.expiration}
+                        onChange={(e) => handleCardInputChange('expiration', e.target.value)}
+                        maxLength={5}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="card-cvv">CVV</Label>
+                      <Input
+                        id="card-cvv"
+                        placeholder="123"
+                        value={cardData.cvv}
+                        onChange={(e) => handleCardInputChange('cvv', e.target.value)}
+                        maxLength={4}
+                        type="password"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </RadioGroup>
         </div>
 
         {/* Order Summary */}
-        {/* ... (código do resumo omitido para brevidade) ... */}
+        <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
+          <h2 className="text-xl font-bold mb-4">Resumo do Pedido</h2>
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <span>Subtotal</span>
+              <span>R$ 67,90</span>
+            </div>
+            <div className="flex justify-between text-green-600">
+              <span>Desconto PIX (7%)</span>
+              <span>- R$ 4,75</span>
+            </div>
+            <div className="flex justify-between text-green-600">
+              <span>Frete</span>
+              <span>Grátis</span>
+            </div>
+            <Separator className="my-2" />
+            <div className="flex justify-between text-xl font-bold">
+              <span>Total</span>
+              <span className="text-green-600">R$ 63,15</span>
+            </div>
+          </div>
+        </div>
 
         {/* Submit Button */}
         <Button 
@@ -383,12 +633,36 @@ const Checkout = () => {
           {isProcessing ? 'Processando...' : 'Finalizar Compra'}
         </Button>
 
+        {/* ERRO GERAL DA API (Se o erro não for de CPF) */}
+        {apiError?.field === 'general' && (
+            <div className="mt-4 text-center text-red-500 font-medium">
+                Erro: {apiError.message}
+            </div>
+        )}
+
         {/* Security Info */}
-        {/* ... (código da segurança omitido para brevidade) ... */}
+        <div className="mt-6 text-center text-sm text-gray-600">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Lock className="h-4 w-4" />
+            <span>Ambiente 100% Seguro</span>
+          </div>
+          <p>Seus dados estão protegidos e a compra é totalmente segura</p>
+        </div>
       </div>
 
         {/* Footer */}
-      {/* ... (código do footer omitido para brevidade) ... */}
+      <footer className="bg-[#f2f2f2] py-8 mt-12">
+        <div className="container mx-auto px-4 text-center text-sm text-[#3a3636]">
+          <p className="mb-2">© 2025 TikTokShop - Oficial. Todos os direitos reservados.</p>
+          <div className="flex items-center justify-center gap-4">
+            <span>CNPJ: 21.999.999/923131</span>
+            <span>•</span>
+            <span>pedroalvares@gmail.com</span>
+            <span>•</span>
+            <span>(21) 99999-9999</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 };
