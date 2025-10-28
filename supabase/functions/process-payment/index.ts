@@ -46,7 +46,7 @@ async function postWithRetry(url: string, init: RequestInit, maxRetries = 5) {
         try {
             const res = await fetch(url, init);
             
-            // CORREÇÃO: Se não for 429 (ou se for 429 mas sem mais retentativas), retorna.
+            // Se não for 429 (ou se for 429 mas sem mais retentativas), retorna.
             if (res.status !== 429 || attempt >= maxRetries) return res;
 
         } catch (error: any) {
@@ -70,12 +70,11 @@ async function postWithRetry(url: string, init: RequestInit, maxRetries = 5) {
 // --- Servidor Principal ---
 
 serve(async (req) => {
-    // ⚠️ CORREÇÃO CORS: Removemos o header duplicado.
+    // 💥 CORREÇÃO AGRESSIVA: Permite todos os headers (*) para resolver o erro CORS (x-client-info)
     const cors = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        // 'X-Client-Info' incluído para tentar resolver o erro CORS.
-        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Public-Key, X-Secret-Key, X-Client-Info", 
+        "Access-Control-Allow-Headers": "*", // <<< MUDANÇA AQUI
         "Vary": "Origin",
     };
     
@@ -119,7 +118,6 @@ serve(async (req) => {
             amount: amountFixed,
             client: {
                 name: String(customer.name),
-                // CORREÇÃO: Usamos apenas o documento sanitizado
                 document: docOnlyDigits,
                 ...(customer.email ? { email: String(customer.email) } : {}),
                 ...(customer.phone ? { phone: String(customer.phone) } : {}),
@@ -181,7 +179,7 @@ serve(async (req) => {
 
         // Resposta de Sucesso (200 OK para o Cliente)
         const d = json || {};
-        return new Response(JSON.stringify({
+        return new Response(new Response(JSON.stringify({
             success: true,
             transactionId: d.transactionId,
             identifier: d.order?.id,
@@ -190,7 +188,7 @@ serve(async (req) => {
             qrCodeImage: d.pix?.image,
             amount: d.order?.amount || d.amount,
             status: d.status,
-        }), { status: 200, headers: { "Content-Type": "application/json", ...cors } });
+        }), { status: 200, headers: { "Content-Type": "application/json", ...cors } }));
 
     } catch (e: any) {
         console.error("[ERROR] Erro no Servidor (Interno):", e);
