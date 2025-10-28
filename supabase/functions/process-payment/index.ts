@@ -70,11 +70,11 @@ async function postWithRetry(url: string, init: RequestInit, maxRetries = 5) {
 // --- Servidor Principal ---
 
 serve(async (req) => {
-    // 💥 CORREÇÃO AGRESSIVA: Permite todos os headers (*) para resolver o erro CORS (x-client-info)
+    // ✅ CORREÇÃO CORS: Lista explícita de headers para permitir o 'x-client-info'
     const cors = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "*", // <<< MUDANÇA AQUI
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", // <--- CORREÇÃO AQUI
         "Vary": "Origin",
     };
     
@@ -179,7 +179,7 @@ serve(async (req) => {
 
         // Resposta de Sucesso (200 OK para o Cliente)
         const d = json || {};
-        return new Response(new Response(JSON.stringify({
+        return new Response(JSON.stringify({ // <--- CORREÇÃO DO BUG AQUI
             success: true,
             transactionId: d.transactionId,
             identifier: d.order?.id,
@@ -188,7 +188,7 @@ serve(async (req) => {
             qrCodeImage: d.pix?.image,
             amount: d.order?.amount || d.amount,
             status: d.status,
-        }), { status: 200, headers: { "Content-Type": "application/json", ...cors } }));
+        }), { status: 200, headers: { "Content-Type": "application/json", ...cors } });
 
     } catch (e: any) {
         console.error("[ERROR] Erro no Servidor (Interno):", e);
