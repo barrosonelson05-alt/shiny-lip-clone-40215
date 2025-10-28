@@ -17,6 +17,10 @@ if (!AMPLOPAY_PK || !AMPLOPAY_SK) {
 
 // --- Funções Auxiliares ---
 
+/**
+ * Normaliza o valor para duas casas decimais, tratando strings com vírgula ou ponto.
+ * Retorna um número.
+ */
 function normalizeAmount(value: string | number): number {
     if (typeof value === "number") return Number(value.toFixed(2));
     const s = String(value).trim().replace(/\./g, "").replace(",", ".");
@@ -25,25 +29,30 @@ function normalizeAmount(value: string | number): number {
     return Number(n.toFixed(2));
 }
 
+/**
+ * Remove todos os caracteres não-dígitos do documento (CPF/CNPJ).
+ */
 function sanitizeDoc(doc?: string) {
     return doc?.replace(/\D/g, "") || "";
 }
 
-// Função com Retentativas e Logs aprimorados
+/**
+ * Função que faz a requisição POST com retentativas e tratamento de 429.
+ */
 async function postWithRetry(url: string, init: RequestInit, maxRetries = 5) {
     let attempt = 0;
     let wait = 500;
     while (true) {
         try {
             const res = await fetch(url, init);
+            
+            // CORREÇÃO: Se não for 429 (ou se for 429 mas sem mais retentativas), retorna.
             if (res.status !== 429 || attempt >= maxRetries) return res;
-        } catch (error: any) {
-            // 🚀 LOG DE DEBUG: Captura erros de rede/conexão com detalhes completos
-            console.error(`[ERROR] Falha de conexão na tentativa ${attempt + 1}/${maxRetries} para ${url}`);
-            console.error(`[ERROR] Tipo de erro:`, error?.constructor?.name || 'Unknown');
-            console.error(`[ERROR] Mensagem:`, error?.message || 'Sem mensagem');
-            console.error(`[ERROR] Detalhes completos:`, error);
 
+        } catch (error: any) {
+            // Log de DEBUG para erros de rede/conexão
+            console.error(`[ERROR] Falha de conexão na tentativa ${attempt + 1}/${maxRetries} para ${url}`);
+            
             if (attempt >= maxRetries) {
                 const errorType = error?.constructor?.name || 'NetworkError';
                 const errorMsg = error?.message || 'Erro desconhecido';
@@ -61,12 +70,12 @@ async function postWithRetry(url: string, init: RequestInit, maxRetries = 5) {
 // --- Servidor Principal ---
 
 serve(async (req) => {
-    // ⚠️ CORREÇÃO CORS: Adicionando cabeçalhos comuns (como x-client-info do log)
+    // ⚠️ CORREÇÃO CORS: Removemos o header duplicado.
     const cors = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        // Adicionando headers de API e o 'x-client-info' que estava causando o CORS
-        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Public-Key, X-Secret-Key, X-Client-Info, x-client-info", 
+        // 'X-Client-Info' incluído para tentar resolver o erro CORS.
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Public-Key, X-Secret-Key, X-Client-Info", 
         "Vary": "Origin",
     };
     
@@ -79,7 +88,7 @@ serve(async (req) => {
         });
     }
 
-    // 🚀 LOG DE DEBUG: Confirma a leitura das chaves sem expor o segredo completo
+    // Logs para confirmar leitura das chaves
     console.log(`[DEBUG] PK Lida (Início/Fim): ${AMPLOPAY_PK.substring(0, 5)}...${AMPLOPAY_PK.substring(AMPLOPAY_PK.length - 5)}`);
     console.log(`[DEBUG] SK Lida (Início/Fim): ${AMPLOPAY_SK.substring(0, 5)}...${AMPLOPAY_SK.substring(AMPLOPAY_SK.length - 5)}`);
 
@@ -91,7 +100,8 @@ serve(async (req) => {
             description,
             customer,
             identifier,
-            callbackUrl
+            callbackUrl,
+            splits // Adicionado para suportar splits (opcional)
         } = body || {};
 
         if (amount == null || !identifier || !customer?.name || !customer?.document || !callbackUrl) {
@@ -103,12 +113,14 @@ serve(async (req) => {
         const amountFixed = normalizeAmount(amount);
         const docOnlyDigits = sanitizeDoc(customer.document);
 
-        const payload = {
+        // Montagem do Payload da AmploPay
+        const payload: Record<string, any> = {
             identifier: String(identifier),
             amount: amountFixed,
             client: {
                 name: String(customer.name),
-                document: docOnlyDigits.length ? docOnlyDigits : customer.document,
+                // CORREÇÃO: Usamos apenas o documento sanitizado
+                document: docOnlyDigits,
                 ...(customer.email ? { email: String(customer.email) } : {}),
                 ...(customer.phone ? { phone: String(customer.phone) } : {}),
             },
@@ -117,6 +129,11 @@ serve(async (req) => {
                 ...(description ? { description: String(description) } : {}),
             },
         };
+
+        // Adiciona splits se estiver presente no body (opcional)
+        if (splits) {
+            payload.splits = splits;
+        }
 
         console.log("[DEBUG] Payload sendo enviado:", JSON.stringify(payload, null, 2));
 
@@ -130,7 +147,7 @@ serve(async (req) => {
             body: JSON.stringify(payload),
         });
 
-        // ⚠️ TRATAMENTO DE ERRO: 401/403 (Acesso Negado)
+        // Tratamento de Erro de Autenticação/IP (401/403)
         if (res.status === 401 || res.status === 403) {
             console.error(`[ERROR] Acesso Negado (Status ${res.status}). Chaves inválidas ou IP bloqueado.`);
             const rawError = await res.text();
@@ -143,7 +160,7 @@ serve(async (req) => {
         const raw = await res.text();
         let json: any;
         try { json = JSON.parse(raw); } catch {
-            // Log e retorno para respostas que não são JSON e não são 401/403
+            // Log para respostas não-JSON
             console.error("[ERROR] Resposta inválida da AmploPay (Não-JSON):", raw);
             return new Response(JSON.stringify({ error: "Resposta inválida da AmploPay" }), {
                 status: 502, headers: { "Content-Type": "application/json", ...cors }
@@ -153,6 +170,7 @@ serve(async (req) => {
         console.log("[DEBUG] Status Recebido:", res.status);
         console.log("[DEBUG] JSON Recebido:", json);
 
+        // Checa o status HTTP (espera 201) e o status do corpo JSON (se houver)
         if (res.status !== 201 || json?.status !== "OK") {
             const msg = json?.errorDescription || json?.message || raw || "Erro na AmploPay";
             const status = res.status || 502;
@@ -161,6 +179,7 @@ serve(async (req) => {
             });
         }
 
+        // Resposta de Sucesso (200 OK para o Cliente)
         const d = json || {};
         return new Response(JSON.stringify({
             success: true,
