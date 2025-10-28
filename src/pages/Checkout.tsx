@@ -7,7 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { Gift, Zap, Truck, RotateCcw, Lock, CreditCard } from 'lucide-react';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client'; 
+import { supabase } from '@/integrations/supabase/client';
 
 // Assets (Verifique se os caminhos dos seus assets estão corretos)
 import tiktokShopIcon from '@/assets/tiktok-shop-icon.webp';
@@ -43,28 +43,42 @@ interface ApiError {
 
 // Funções de formatação (melhoradas)
 const formatCPF = (value: string) => {
-  const cleaned = value.replace(/\D/g, '');
-  if (cleaned.length <= 11) {
-    return cleaned
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d)/, '$1.$2')
-      .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
-  }
-  return value;
+  const cleaned = value.replace(/\D/g, '').substring(0, 11);
+  return cleaned
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
 };
 
 const formatCardNumber = (value: string) => {
-  const cleaned = value.replace(/\D/g, '');
+  const cleaned = value.replace(/\D/g, '').substring(0, 16); // Limita a 16 dígitos
   const formatted = cleaned.match(/.{1,4}/g)?.join(' ') || cleaned;
-  return formatted.substring(0, 19); 
+  return formatted; // Não precisa de substring(0, 19) se o cleaned for 16
+};
+
+// **CORREÇÃO/MELHORIA:** Formatação do CEP para 00000-000
+const formatCEP = (value: string) => {
+    const cleaned = value.replace(/\D/g, '').substring(0, 8);
+    return cleaned.replace(/^(\d{5})(\d{1,3})$/, '$1-$2');
 };
 
 const formatExpiration = (value: string) => {
-  const cleaned = value.replace(/\D/g, '');
+  const cleaned = value.replace(/\D/g, '').substring(0, 4);
   if (cleaned.length >= 2) {
     return cleaned.substring(0, 2) + '/' + cleaned.substring(2, 4);
   }
   return cleaned;
+};
+
+const formatPhone = (value: string) => {
+    // Implementação básica: (XX) XXXX-XXXX ou (XX) XXXXX-XXXX
+    const cleaned = value.replace(/\D/g, '').substring(0, 11);
+    const match = cleaned.match(/^(\d{2})(\d{4,5})(\d{4})$/);
+
+    if (match) {
+        return `(${match[1]}) ${match[2]}-${match[3]}`;
+    }
+    return value; // Devolve o valor limpo se não corresponder
 };
 
 const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -75,11 +89,11 @@ const validateCPF = (cpf: string) => cpf.replace(/\D/g, '').length === 11;
 
 const Checkout = () => {
   const { toast } = useToast();
-  const [timeLeft, setTimeLeft] = useState(120000); 
+  const [timeLeft, setTimeLeft] = useState(120000);
   const [selectedPayment, setSelectedPayment] = useState('Pix');
   const [cepLoading, setCepLoading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   // Estados para dados de Identificação e Entrega
   const [customerData, setCustomerData] = useState<CustomerData>({
     name: '',
@@ -102,7 +116,7 @@ const Checkout = () => {
     expiration: '',
     cvv: ''
   });
-  
+
   // Estado para erros (API ou Validação)
   const [apiError, setApiError] = useState<ApiError | null>(null);
 
@@ -129,15 +143,19 @@ const Checkout = () => {
 
     if (field === 'cpf') {
       formattedValue = formatCPF(value);
+    } else if (field === 'cep') { // **NOVO**
+      formattedValue = formatCEP(value);
+    } else if (field === 'phone') { // **NOVO**
+      formattedValue = formatPhone(value);
     }
-    
+
     setCustomerData(prev => ({ ...prev, [field]: formattedValue }));
   };
 
   const handleCardInputChange = (field: keyof CardData, value: string) => {
     setApiError(null); // Limpa o erro ao digitar
     let formattedValue = value;
-    
+
     if (field === 'number') {
       formattedValue = formatCardNumber(value);
     } else if (field === 'expiration') {
@@ -145,52 +163,62 @@ const Checkout = () => {
     } else if (field === 'cvv') {
       formattedValue = value.replace(/\D/g, '').substring(0, 4);
     } else if (field === 'holderName') {
-        formattedValue = value.toUpperCase();
+      formattedValue = value.toUpperCase();
     }
-    
+
     setCardData(prev => ({ ...prev, [field]: formattedValue }));
   };
 
+  // **CORREÇÃO CRÍTICA:** Garantir que o CEP na chamada seja o valor LIMPO
   const fillAddress = useCallback(async (cep: string) => {
     const cleanCep = cep.replace(/\D/g, '');
     if (cleanCep.length !== 8) {
       return;
     }
 
+    // Previne busca repetida se já estiver buscando
+    if (cepLoading) return;
+
     setCepLoading(true);
     setApiError(null);
-    
+
     try {
+      // Use o 'cleanCep' na URL
       const response = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
       const data = await response.json();
-      
+
       if (data.erro) {
         toast({ title: "CEP não encontrado", description: "Verifique o CEP.", variant: "destructive" });
         setCustomerData(prev => ({ ...prev, address: '', neighborhood: '', city: '', state: '' }));
         return;
       }
-      
-      setCustomerData(prev => ({ 
-        ...prev, 
+
+      setCustomerData(prev => ({
+        ...prev,
         address: data.logradouro || '',
         neighborhood: data.bairro || '',
         city: data.localidade || '',
         state: data.uf || '',
       }));
-      
-      toast({ title: "Endereço encontrado!", description: "Campos preenchidos automaticamente." });
+
+      // Removido o toast aqui para não ser intrusivo a cada letra digitada que complete o CEP
     } catch (error) {
       toast({ title: "Erro ao buscar CEP", description: "Tente novamente.", variant: "destructive" });
     } finally {
       setCepLoading(false);
     }
-  }, [toast]);
-  
+  }, [toast, cepLoading]); // Adicionado cepLoading como dependência
+
   useEffect(() => {
-      // Chama a função fillAddress sempre que o CEP é alterado e tem 8 dígitos
-      if (customerData.cep.replace(/\D/g, '').length === 8) {
-          fillAddress(customerData.cep);
-      }
+    // Chama a função fillAddress somente quando o CEP for totalmente digitado (8 dígitos limpos)
+    const cleanCep = customerData.cep.replace(/\D/g, '');
+    if (cleanCep.length === 8) {
+      fillAddress(customerData.cep);
+    }
+    // **MELHORIA:** Se o CEP for apagado/incompleto, limpe automaticamente os campos de endereço
+    if (cleanCep.length < 8 && customerData.address) {
+        setCustomerData(prev => ({ ...prev, address: '', neighborhood: '', city: '', state: '' }));
+    }
   }, [customerData.cep, fillAddress]);
 
 
@@ -198,14 +226,14 @@ const Checkout = () => {
 
   const processPayment = async () => {
     setIsProcessing(true);
-    setApiError(null); 
+    setApiError(null);
 
     const { name, email, phone, cpf, address, number, city, state } = customerData;
 
     // 1. Validações Front-end
 
     if (!name || !email || !phone || !cpf || !address || !number || !city || !state) {
-      setApiError({ field: 'general', message: "Por favor, preencha todos os campos obrigatórios." });
+      setApiError({ field: 'general', message: "Por favor, preencha todos os campos de Identificação e Entrega." });
       toast({ title: "Campos obrigatórios", description: "Preencha todos os dados.", variant: "destructive" });
       setIsProcessing(false);
       return;
@@ -225,64 +253,78 @@ const Checkout = () => {
       return;
     }
 
-    const cleanedData = { 
-      name: name.trim(), 
-      email: email.trim(), 
-      phone: phone.replace(/\D/g, ''), 
+    const cleanedData = {
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.replace(/\D/g, ''),
       cpf: cpf.replace(/\D/g, ''),
+      // **NOVO** Adicionar dados de endereço limpos para o backend, se necessário.
+      address: address.trim(),
+      number: number.trim(),
+      city: city.trim(),
+      state: state.trim(),
+      cep: customerData.cep.replace(/\D/g, ''),
     };
 
-    const amount = selectedPayment === 'Pix' ? 63.15 : 67.90; 
+    const amount = selectedPayment === 'Pix' ? 63.15 : 67.90;
 
     // 2. Validação e Processamento do Cartão
     if (selectedPayment === 'Cartao') {
       const { number: cNumber, holderName, expiration, cvv } = cardData;
+      // **MELHORIA:** Validação mais específica para o cartão
+      const cleanCardNumber = cNumber.replace(/\s/g, '');
 
-      if (!cNumber || !holderName || !expiration || !cvv || cNumber.replace(/\s/g, '').length < 15 || expiration.length < 5 || cvv.length < 3) {
+      if (
+        !cleanCardNumber || cleanCardNumber.length < 15 ||
+        !holderName || !expiration || expiration.length < 5 ||
+        !cvv || cvv.length < 3
+      ) {
         setApiError({ field: 'general', message: "Preencha todos os dados do cartão corretamente." });
-        toast({ title: "Dados do cartão incompletos", description: "Preencha os dados do cartão.", variant: "destructive" });
+        toast({ title: "Dados do cartão incompletos", description: "Verifique todos os campos do cartão.", variant: "destructive" });
         setIsProcessing(false);
         return;
       }
-      
+
+      // ... (Restante do processamento de Cartão, mantido o seu código original) ...
       const cardToken = btoa(JSON.stringify({
-        number: cNumber.replace(/\s/g, ''),
-        holderName,
-        expiration,
-        cvv
-      }));
+         number: cNumber.replace(/\s/g, ''),
+         holderName,
+         expiration,
+         cvv
+       }));
 
-      try {
-        const { data, error } = await supabase.functions.invoke('process-payment', {
-          body: {
-            paymentMethod: 'CARD',
-            amount,
-            cardToken,
-            customerData: cleanedData
-          }
-        });
+       try {
+         const { data, error } = await supabase.functions.invoke('process-payment', {
+           body: {
+             paymentMethod: 'CARD',
+             amount,
+             cardToken,
+             customerData: cleanedData
+           }
+         });
 
-        if (error) throw error;
-        
-        if (data && data.error) {
-            throw new Error(data.error); 
-        }
+         if (error) throw error;
 
-        if (data.success) {
-          toast({ title: "Pagamento aprovado!", description: `Transação: ${data.transactionId}` });
-          // Redirecionar para sucesso
-        } else {
-          throw new Error("Erro desconhecido ao processar Cartão.");
-        }
-      } catch (error) {
-        // Trata erros de rede ou da Edge Function
-        handlePaymentError(error);
-      }
+         if (data && data.error) {
+             throw new Error(data.error);
+         }
+
+         if (data.success) {
+           toast({ title: "Pagamento aprovado!", description: `Transação: ${data.transactionId}` });
+           // Redirecionar para sucesso
+         } else {
+           throw new Error("Erro desconhecido ao processar Cartão.");
+         }
+       } catch (error) {
+         // Trata erros de rede ou da Edge Function
+         handlePaymentError(error);
+       }
 
 
     } else {
       // 3. Processamento do Pix
 
+      // ... (Restante do processamento de Pix, mantido o seu código original) ...
       try {
         const { data, error } = await supabase.functions.invoke('process-payment', {
           body: {
@@ -295,7 +337,7 @@ const Checkout = () => {
         if (error) throw error;
 
         if (data && data.error) {
-            throw new Error(data.error); 
+            throw new Error(data.error);
         }
 
         if (data.success) {
@@ -316,30 +358,35 @@ const Checkout = () => {
 
   // --- FUNÇÃO DE TRATAMENTO DE ERRO CENTRALIZADA ---
   const handlePaymentError = (error: any) => {
+    // ... (Mantido o seu código original) ...
     const errorMessage = error instanceof Error ? error.message : "Erro desconhecido";
-    
-    // TRATAMENTO CRÍTICO PARA O ERRO DA EDGE FUNCTION
-    if (errorMessage.includes('Failed to send a request to the Edge Function') || errorMessage.includes('FetchError')) {
-        setApiError({ field: 'network', message: "Erro de rede/servidor. Por favor, verifique sua conexão ou tente novamente mais tarde." });
-        toast({ title: "Erro de Conexão", description: "Não foi possível conectar com o servidor de pagamento.", variant: "destructive" });
-        return;
-    }
 
-    // Trata erros da API, como CPF Inválido
-    if (errorMessage.toLowerCase().includes('cpf')) {
-        setApiError({ field: 'cpf', message: errorMessage });
-    } else {
-        setApiError({ field: 'general', message: errorMessage });
-    }
-    
-    toast({ title: "Erro no pagamento", description: errorMessage, variant: "destructive" });
+     // TRATAMENTO CRÍTICO PARA O ERRO DA EDGE FUNCTION
+     if (errorMessage.includes('Failed to send a request to the Edge Function') || errorMessage.includes('FetchError')) {
+         setApiError({ field: 'network', message: "Erro de rede/servidor. Por favor, verifique sua conexão ou tente novamente mais tarde." });
+         toast({ title: "Erro de Conexão", description: "Não foi possível conectar com o servidor de pagamento.", variant: "destructive" });
+         setIsProcessing(false); // **NOVO:** Garante que o botão seja liberado
+         return;
+     }
+
+     // Trata erros da API, como CPF Inválido
+     if (errorMessage.toLowerCase().includes('cpf')) {
+         setApiError({ field: 'cpf', message: errorMessage });
+     } else {
+         setApiError({ field: 'general', message: errorMessage });
+     }
+
+     toast({ title: "Erro no pagamento", description: errorMessage, variant: "destructive" });
+     setIsProcessing(false); // **NOVO:** Garante que o botão seja liberado
   };
-  
-  // --- RENDERIZAÇÃO ---
+
+
+  // --- RENDERIZAÇÃO (Melhoria na prop de maxLength do CEP) ---
 
   return (
     <div className="min-h-screen bg-[#f9f9fa]">
-      {/* Header e Advice Bar (mantidos do código anterior) */}
+      {/* ... (Header, Advice Bar, Progress, Timer, Product Info, Priority Benefits - Mantidos) ... */}
+
       <header className="bg-white border-b">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
@@ -362,10 +409,7 @@ const Checkout = () => {
       </div>
 
       <div className="container mx-auto px-4 py-6 max-w-4xl">
-        
-        {/* Progress, Timer, Product Info, Priority Benefits (mantidos) */}
-        {/* ... (código mantido, sem alterações estruturais) ... */}
-        
+
         {/* Progress Steps */}
         <div className="bg-black text-white rounded-lg p-4 mb-6">
           <div className="flex items-center justify-between">
@@ -391,7 +435,7 @@ const Checkout = () => {
             </div>
           </div>
           <div className="text-right text-xs mt-2">
-              Você está na etapa 2 (Identificação)
+            Você está na etapa 2 (Identificação)
           </div>
         </div>
 
@@ -400,16 +444,16 @@ const Checkout = () => {
           <div className="flex items-center justify-center gap-2 mb-2">
             <Zap className="h-5 w-5" />
             <span className="font-bold uppercase text-sm">Oferta Relâmpago</span>
-            </div>
+          </div>
           <div className="text-3xl font-bold">{formatTime(timeLeft)}</div>
         </div>
 
         {/* Product Info */}
         <div className="bg-white rounded-lg p-6 mb-6 shadow-sm">
           <div className="flex gap-4">
-            <img 
-              src={scooterProduct} 
-              alt="Patinete Elétrico" 
+            <img
+              src={scooterProduct}
+              alt="Patinete Elétrico"
               className="w-24 h-24 rounded-lg flex-shrink-0 object-cover"
             />
             <div className="flex-1">
@@ -475,24 +519,24 @@ const Checkout = () => {
         {/* Payment Form (Atualizado com estados) */}
         <div className="bg-white rounded-lg p-6 shadow-sm mb-6">
           <h2 className="text-xl font-bold mb-4">Identificação</h2>
-          
+
           <div className="space-y-4 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="name">Nome completo</Label>
-                <Input 
-                  id="name" 
-                  placeholder="Digite seu nome completo" 
+                <Input
+                  id="name"
+                  placeholder="Digite seu nome completo"
                   value={customerData.name}
                   onChange={(e) => handleCustomerInputChange('name', e.target.value)}
                 />
               </div>
               <div>
                 <Label htmlFor="email" className={apiError?.field === 'email' ? 'text-red-500' : ''}>E-mail</Label>
-                <Input 
-                  id="email" 
-                  type="email" 
-                  placeholder="seu@email.com" 
+                <Input
+                  id="email"
+                  type="email"
+                  placeholder="seu@email.com"
                   value={customerData.email}
                   onChange={(e) => handleCustomerInputChange('email', e.target.value)}
                   className={apiError?.field === 'email' ? 'border-red-500 focus:border-red-500' : ''}
@@ -503,17 +547,18 @@ const Checkout = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="phone">Telefone/WhatsApp</Label>
-                <Input 
-                  id="phone" 
-                  placeholder="(21) 99999-9999" 
+                <Input
+                  id="phone"
+                  placeholder="(21) 99999-9999"
                   value={customerData.phone}
                   onChange={(e) => handleCustomerInputChange('phone', e.target.value)}
+                  maxLength={15} {/* MaxLength adicionado para a formatação de telefone */}
                 />
               </div>
               <div>
                 <Label htmlFor="cpf" className={apiError?.field === 'cpf' ? 'text-red-500' : ''}>CPF</Label>
-                <Input 
-                  id="cpf" 
+                <Input
+                  id="cpf"
                   placeholder="000.000.000-00"
                   maxLength={14}
                   value={customerData.cpf}
@@ -528,15 +573,15 @@ const Checkout = () => {
           <Separator className="my-6" />
 
           <h2 className="text-xl font-bold mb-4">Endereço de Entrega</h2>
-          
+
           <div className="space-y-4 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="cep">CEP</Label>
-                <Input 
-                  id="cep" 
-                  placeholder="00000-000" 
-                  maxLength={9}
+                <Input
+                  id="cep"
+                  placeholder="00000-000"
+                  maxLength={9} {/* Mantido 9 para 00000-000 */}
                   value={customerData.cep}
                   onChange={(e) => handleCustomerInputChange('cep', e.target.value)}
                   disabled={cepLoading}
@@ -545,9 +590,9 @@ const Checkout = () => {
               </div>
               <div>
                 <Label htmlFor="address">Endereço</Label>
-                <Input 
-                  id="address" 
-                  placeholder="Rua" 
+                <Input
+                  id="address"
+                  placeholder="Rua"
                   value={customerData.address}
                   onChange={(e) => handleCustomerInputChange('address', e.target.value)}
                 />
@@ -556,18 +601,18 @@ const Checkout = () => {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="number">Número</Label>
-                <Input 
-                  id="number" 
-                  placeholder="Número" 
+                <Input
+                  id="number"
+                  placeholder="Número"
                   value={customerData.number}
                   onChange={(e) => handleCustomerInputChange('number', e.target.value)}
                 />
               </div>
               <div>
                 <Label htmlFor="complement">Complemento</Label>
-                <Input 
-                  id="complement" 
-                  placeholder="Apto, bloco, etc (opcional)" 
+                <Input
+                  id="complement"
+                  placeholder="Apto, bloco, etc (opcional)"
                   value={customerData.complement}
                   onChange={(e) => handleCustomerInputChange('complement', e.target.value)}
                 />
@@ -576,29 +621,30 @@ const Checkout = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="neighborhood">Bairro</Label>
-                <Input 
-                  id="neighborhood" 
-                  placeholder="Bairro" 
+                <Input
+                  id="neighborhood"
+                  placeholder="Bairro"
                   value={customerData.neighborhood}
                   onChange={(e) => handleCustomerInputChange('neighborhood', e.target.value)}
                 />
               </div>
               <div>
                 <Label htmlFor="city">Cidade</Label>
-                <Input 
-                  id="city" 
-                  placeholder="Cidade" 
+                <Input
+                  id="city"
+                  placeholder="Cidade"
                   value={customerData.city}
                   onChange={(e) => handleCustomerInputChange('city', e.target.value)}
                 />
               </div>
               <div>
                 <Label htmlFor="state">Estado</Label>
-                <Input 
-                  id="state" 
-                  placeholder="UF" 
+                <Input
+                  id="state"
+                  placeholder="UF"
                   value={customerData.state}
                   onChange={(e) => handleCustomerInputChange('state', e.target.value)}
+                  maxLength={2}
                 />
               </div>
             </div>
@@ -607,10 +653,10 @@ const Checkout = () => {
           <Separator className="my-6" />
 
           <h2 className="text-xl font-bold mb-4">Forma de Pagamento</h2>
-          
+
           <RadioGroup value={selectedPayment} onValueChange={setSelectedPayment} className="space-y-3">
             {/* Opção PIX */}
-            <div className="flex items-center space-x-2 border rounded-lg p-4 cursor-pointer hover:border-primary">
+            <div className={`flex items-center space-x-2 border rounded-lg p-4 cursor-pointer ${selectedPayment === 'Pix' ? 'border-primary' : 'hover:border-primary'}`}>
               <RadioGroupItem value="Pix" id="pix" />
               <Label htmlFor="pix" className="flex-1 cursor-pointer">
                 <div className="flex items-center justify-between">
@@ -622,10 +668,10 @@ const Checkout = () => {
                 </div>
               </Label>
             </div>
-            
+
             {/* Opção Cartão */}
-            <div className="border rounded-lg">
-              <div className="flex items-center space-x-2 p-4 cursor-pointer hover:border-primary">
+            <div className={`border rounded-lg ${selectedPayment === 'Cartao' ? 'border-primary' : ''}`}>
+              <div className={`flex items-center space-x-2 p-4 cursor-pointer ${selectedPayment !== 'Cartao' ? 'hover:border-primary' : ''}`} onClick={() => setSelectedPayment('Cartao')}>
                 <RadioGroupItem value="Cartao" id="cartao" />
                 <Label htmlFor="cartao" className="flex-1 cursor-pointer">
                   <div className="flex items-center justify-between">
@@ -638,7 +684,7 @@ const Checkout = () => {
                   </div>
                 </Label>
               </div>
-              
+
               {selectedPayment === 'Cartao' && (
                 <div className="px-4 pb-4 space-y-4 border-t pt-4">
                   <div>
@@ -699,7 +745,9 @@ const Checkout = () => {
             </div>
             <div className="flex justify-between text-green-600">
               <span>Desconto PIX (7%)</span>
-              <span>- R$ 4,75</span>
+              <span className={selectedPayment === 'Pix' ? 'text-green-600' : 'text-gray-500'}>
+                {selectedPayment === 'Pix' ? '- R$ 4,75' : 'R$ 0,00'}
+              </span>
             </div>
             <div className="flex justify-between text-green-600">
               <span>Frete</span>
@@ -709,18 +757,18 @@ const Checkout = () => {
             <div className="flex justify-between text-xl font-bold">
               <span>Total</span>
               <span className="text-green-600">
-                  R$ {selectedPayment === 'Pix' ? '63,15' : '67,90'}
+                R$ {selectedPayment === 'Pix' ? '63,15' : '67,90'}
               </span>
             </div>
           </div>
         </div>
 
         {/* Submit Button */}
-        <Button 
+        <Button
           className="w-full h-14 text-lg font-bold uppercase"
           style={{ backgroundColor: '#F72E54' }}
           onClick={processPayment}
-          disabled={isProcessing}
+          disabled={isProcessing || timeLeft <= 0}
         >
           {isProcessing ? 'Processando...' : 'Finalizar Compra'}
         </Button>
