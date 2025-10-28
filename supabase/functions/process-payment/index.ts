@@ -1,15 +1,20 @@
 import { serve } from "https://deno.land/std@0.201.0/http/server.ts";
 
-// ⚠️ Mude as variáveis de ambiente para AMPLOPAY
+// ⚠️ Mantendo a URL padrão e a lógica de ambiente
 const AMPLOPAY_API_URL = (Deno.env.get("URL_API_AMPLOPAY")?.replace(/\/$/, "")) || "https://app.amplopay.com/api/v1";
-const AMPLOPAY_PK = Deno.env.get("AMPLOPAY_PK"); // Sua Public Key
-const AMPLOPAY_SK = Deno.env.get("AMPLOPAY_SK"); // Sua Secret Key
+const AMPLOPAY_PK = Deno.env.get("AMPLOPAY_PK");
+const AMPLOPAY_SK = Deno.env.get("AMPLOPAY_SK");
+const PIX_RECEIVE_ENDPOINT = "/gateway/pix/receive";
+const FULL_API_URL = `${AMPLOPAY_API_URL}${PIX_RECEIVE_ENDPOINT}`;
+
+// 🚀 LOG DE DEBUG: Verifique qual URL de API está sendo usada
+console.log(`[DEBUG] API URL Base: ${AMPLOPAY_API_URL}`);
+console.log(`[DEBUG] Endpoint Completo: ${FULL_API_URL}`);
+
 
 if (!AMPLOPAY_PK || !AMPLOPAY_SK) {
   console.warn("⚠️ AMPLOPAY_PK/AMPLOPAY_SK ausentes! Configure as variáveis de ambiente.");
 }
-
-// Funções utilitárias (mantidas, pois são boas práticas)
 
 function normalizeAmount(value: string | number): number {
   if (typeof value === "number") return Number(value.toFixed(2));
@@ -27,21 +32,25 @@ async function postWithRetry(url: string, init: RequestInit, maxRetries = 3) {
   let attempt = 0;
   let wait = 300;
   while (true) {
-    const res = await fetch(url, init);
-    if (res.status !== 429 || attempt >= maxRetries) return res;
+    try {
+      const res = await fetch(url, init);
+      if (res.status !== 429 || attempt >= maxRetries) return res;
+    } catch (error) {
+       // 🚀 LOG DE DEBUG: Captura erros de rede/conexão
+       console.error(`[ERROR] Falha de conexão na tentativa ${attempt + 1} para ${url}:`, error);
+       if (attempt >= maxRetries) throw new Error("Falha ao se conectar à API da AmploPay após várias tentativas.");
+    }
+    
     await new Promise(r => setTimeout(r, wait));
     wait *= 2;
     attempt++;
   }
 }
 
-// Lógica Principal do Servidor
-
 serve(async (req) => {
   const cors = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    // ⚠️ Headers da AmploPay usam 'Authorization' com Bearer token ou X-Public-Key/X-Secret-Key
     "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Public-Key, X-Secret-Key",
     "Vary": "Origin",
   };
@@ -55,18 +64,14 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    // ⚠️ Mapeamento de campos:
-    // 'identifier' (AmploPay) é 'external_id' ou 'identifier' na requisição original
-    // 'callbackUrl' (AmploPay) é 'callback_url'
     const { 
       amount, 
-      description, // Não é um campo direto no payload, mas pode ir em 'metadata' 
+      description,
       customer, 
-      identifier, // Seu ID da transação (anteriormente external_id)
-      callbackUrl // Sua URL de webhook
+      identifier, 
+      callbackUrl
     } = body || {};
 
-    // Validação de campos OBRIGATÓRIOS da AmploPay
     if (amount == null || !identifier || !customer?.name || !customer?.document || !callbackUrl) {
       return new Response(JSON.stringify({
         error: "Dados incompletos. Envie amount, identifier, customer{name, document}, callbackUrl."
@@ -76,34 +81,29 @@ serve(async (req) => {
     const amountFixed = normalizeAmount(amount);
     const docOnlyDigits = sanitizeDoc(customer.document);
     
-    // ⚠️ Construção do payload da AmploPay
     const payload = {
-      identifier: String(identifier), // Identificador único da transação
+      identifier: String(identifier),
       amount: amountFixed,
-      client: { // Os dados do cliente são agrupados em 'client'
+      client: {
         name: String(customer.name),
         document: docOnlyDigits.length ? docOnlyDigits : customer.document,
         ...(customer.email ? { email: String(customer.email) } : {}),
-        ...(customer.phone ? { phone: String(customer.phone) } : {}), // 'phone' é comum em PIX
+        ...(customer.phone ? { phone: String(customer.phone) } : {}),
       },
       callbackUrl: String(callbackUrl),
-      // ⚠️ Use o campo 'metadata' para incluir a descrição ou outros dados
       metadata: {
         ...(description ? { description: String(description) } : {}),
       },
-      // Campos opcionais que você pode adicionar se precisar:
-      // shippingFee: 0, 
-      // discount: 0,
-      // dueDate: "YYYY-MM-DD",
-      // products: [] 
     };
 
-    // ⚠️ Endpoint CORRETO da AmploPay
-    const res = await postWithRetry(`${AMPLOPAY_API_URL}/gateway/pix/receive`, {
+    // 🚀 LOG DE DEBUG: Mostra o payload exato antes de enviar
+    console.log("[DEBUG] Payload sendo enviado:", JSON.stringify(payload, null, 2));
+
+    const res = await postWithRetry(FULL_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        // A documentação sugere X-Public-Key e X-Secret-Key para autenticação
+        // Chaves agora são lidas corretamente
         "X-Public-Key": AMPLOPAY_PK!,
         "X-Secret-Key": AMPLOPAY_SK!,
       },
@@ -113,12 +113,18 @@ serve(async (req) => {
     const raw = await res.text();
     let json: any;
     try { json = JSON.parse(raw); } catch {
+      // 🚀 LOG DE DEBUG: Resposta inválida
+      console.error("[ERROR] Resposta inválida da AmploPay:", raw);
       return new Response(JSON.stringify({ error: "Resposta inválida da AmploPay" }), {
         status: 502, headers: { "Content-Type": "application/json", ...cors }
       });
     }
+    
+    // 🚀 LOG DE DEBUG: Resposta recebida
+    console.log("[DEBUG] Status Recebido:", res.status);
+    console.log("[DEBUG] JSON Recebido:", json);
 
-    // ⚠️ A AmploPay retorna status 201 OK no sucesso
+
     if (res.status !== 201 || json?.status !== "OK") { 
       const msg = json?.errorDescription || json?.message || raw || "Erro na AmploPay";
       const status = res.status || 502;
@@ -127,20 +133,20 @@ serve(async (req) => {
       });
     }
 
-    // ⚠️ Mapeamento de campos de RETORNO da AmploPay
     const d = json || {};
     return new Response(JSON.stringify({
       success: true,
-      transactionId: d.transactionId, // ID único da AmploPay
-      identifier: d.order?.id, // ID da ordem ou outro identificador de pedido
-      qrCode: d.pix?.code, // Pix Copia e Cola
-      qrCodeBase64: d.pix?.base64, // Imagem Base64 do QR Code
-      qrCodeImage: d.pix?.image, // URL da imagem do QR Code
+      transactionId: d.transactionId,
+      identifier: d.order?.id,
+      qrCode: d.pix?.code,
+      qrCodeBase64: d.pix?.base64,
+      qrCodeImage: d.pix?.image,
       amount: d.order?.amount || d.amount,
       status: d.status,
     }), { status: 200, headers: { "Content-Type": "application/json", ...cors } });
 
   } catch (e: any) {
+    console.error("[ERROR] Erro no Servidor:", e); // 🚀 LOG DE DEBUG: Erro interno
     return new Response(JSON.stringify({ error: "Internal Server Error", message: String(e?.message || e) }), {
       status: 500, headers: { "Content-Type": "application/json", ...cors }
     });
