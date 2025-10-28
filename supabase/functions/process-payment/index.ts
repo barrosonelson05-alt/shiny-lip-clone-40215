@@ -28,19 +28,28 @@ function sanitizeDoc(doc?: string) {
   return doc?.replace(/\D/g, "") || "";
 }
 
-async function postWithRetry(url: string, init: RequestInit, maxRetries = 3) {
+async function postWithRetry(url: string, init: RequestInit, maxRetries = 5) {
   let attempt = 0;
-  let wait = 300;
+  let wait = 500;
   while (true) {
     try {
       const res = await fetch(url, init);
       if (res.status !== 429 || attempt >= maxRetries) return res;
-    } catch (error) {
-       // 🚀 LOG DE DEBUG: Captura erros de rede/conexão
-       console.error(`[ERROR] Falha de conexão na tentativa ${attempt + 1} para ${url}:`, error);
-       if (attempt >= maxRetries) throw new Error("Falha ao se conectar à API da AmploPay após várias tentativas.");
+    } catch (error: any) {
+       // 🚀 LOG DE DEBUG: Captura erros de rede/conexão com detalhes completos
+       console.error(`[ERROR] Falha de conexão na tentativa ${attempt + 1}/${maxRetries} para ${url}`);
+       console.error(`[ERROR] Tipo de erro:`, error?.constructor?.name || 'Unknown');
+       console.error(`[ERROR] Mensagem:`, error?.message || 'Sem mensagem');
+       console.error(`[ERROR] Detalhes completos:`, error);
+       
+       if (attempt >= maxRetries) {
+         const errorType = error?.constructor?.name || 'NetworkError';
+         const errorMsg = error?.message || 'Erro desconhecido';
+         throw new Error(`Falha ao conectar à API da AmploPay após ${maxRetries} tentativas. Tipo: ${errorType}, Mensagem: ${errorMsg}`);
+       }
     }
     
+    console.log(`[RETRY] Aguardando ${wait}ms antes da próxima tentativa...`);
     await new Promise(r => setTimeout(r, wait));
     wait *= 2;
     attempt++;
